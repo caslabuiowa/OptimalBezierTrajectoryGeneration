@@ -1,700 +1,716 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Bezier curve library.
+Created on Fri Jan 25 10:20:47 2019
 
-Written by Calvin Kielas-Jensen
+@author: ckielasjensen
 """
 
-#TODO
-#   * Move the functions to the Bezier class rather than have them be module
-#   * Add a function to return minimum distance between two curves.
-#   * Precompute the elevation matrix
-#   * Convert as many functions as possible over to numba.njit for speed up
-#   * Change everything back to np.array since matrix may be removed
-#   * Make RationalBezier inherit Bezier (after changing Bezier)
+from collections import defaultdict
 
-import sys
-if sys.version_info[0] != 2 or sys.version_info[1] != 7:
-    msg = ('WARNING: This code was developed in Python 2.7\n'
-           'Your current version is {}.'.format(sys.version))
-    print(msg)
-
+import matplotlib.pyplot as plt
+import numba
 import numpy as np
-import numpy.matlib as mat
-from scipy.special import binom
-from sympy import lambdify, Matrix
+# from scipy.special import binom
+# from sympy import lambdify, Matrix
+# from sympy.solvers import solve
 
-class Bezier:
+
+class BezierParams:
+    """Parent class used for storing Bezier parameters
+
     """
-    Bezier curve class.
-    
-    Allows the user to construct Bezier curves of arbitrary dimension and
-    degrees.
-    """
-    
-    # Class level variables
-    Q = dict()
-    
-    def __init__(self, ctrlPts=None, tau=None):
-        if ctrlPts is not None:
-            self._ctrlPts = mat.mat(ctrlPts)
-            self._dim = self.ctrlPts.shape[0]
-            self._deg = self.ctrlPts.shape[1] - 1
+    def __init__(self, cpts=None, tau=None, tf=1.0):
+        self._tf = float(tf)
+        self._curve = None
+
+        if cpts is not None:
+            self._cpts = np.array(cpts, ndmin=2)
+            self._dim = self._cpts.shape[0]
+            self._deg = self._cpts.shape[1] - 1
         else:
             self._dim = None
-            self._deg = None            
-            
-        # Set a default value for tau if it is not passed in
+            self._deg = None
+
         if tau is None:
             self._tau = np.arange(0, 1.01, 0.01)
         else:
             self._tau = np.array(tau)
-    
+
     @property
-    def ctrlPts(self):
-        return self._ctrlPts
-    
-    @ctrlPts.setter
-    def ctrlPts(self, value):
-#        del self._curve
+    def cpts(self):
+        return self._cpts
+
+    @cpts.setter
+    def cpts(self, value):
         self._curve = None
-        self._ctrlPts = mat.mat(value)
-    
-    @property
-    def curve(self):
-        try:
-            return self._curve
-        except AttributeError:
-            self._curve = np.zeros([self._dim, len(self._tau)])
-            for i, pts in enumerate(self._ctrlPts):
-                self._curve[i] = bezierCurve(pts, self._tau)
-            return self._curve
-        
+
+        newCpts = np.array(value, ndmin=2)
+
+        self._dim = newCpts.shape[0]
+        self._deg = newCpts.shape[1] - 1
+        self._cpts = newCpts
+
     @property
     def deg(self):
         return self._deg
-    
+
     @property
     def degree(self):
         return self._deg
-    
+
     @property
     def dim(self):
         return self._dim
-    
+
     @property
     def dimension(self):
         return self._dim
-    
+
+    @property
+    def tf(self):
+        return self._tf
+
+    @tf.setter
+    def tf(self, value):
+        self._tf = float(value)
+
     @property
     def tau(self):
         return self._tau
-    
+
     @tau.setter
     def tau(self, val):
-#        del self._curve
         self._curve = None
         self._tau = val
-        
-    def diff(self):
+
+
+class Bezier:
+    """Bezier curve for trajectory generation
+
+    Allows the user to construct Bezier curves of arbitrary dimension and
+    degrees.
+
+    :param cpts: Control points used to define the Bezier curve. The degree of
+        the Bezier curve is equal to the number of columns -1. The dimension of
+        the curve is equal to the number of rows.
+    :type cpts: numpy.ndarray or None
+    :param tau: Values at which to evaluate the Bezier curve.
+    :type tau: numpy.ndarray or None
+    :param tf: Final time of the Bezier curve trajectory.
+    :type tf: float
+
+    """
+    splitCache = dict()
+    elevationMatrixCache = defaultdict(dict)
+    productMatrixCache = dict()
+    diffMatrixCache = defaultdict(dict)
+
+    def __init__(self, cpts=None, tau=None, tf=1.0):
+        self._tf = float(tf)
+        self._curve = None
+
+        if cpts is not None:
+            self._cpts = np.array(cpts, ndmin=2)
+            self._dim = self._cpts.shape[0]
+            self._deg = self._cpts.shape[1] - 1
+        else:
+            self._dim = None
+            self._deg = None
+
+        if tau is None:
+            self._tau = np.arange(0, 1.01, 0.01)
+        else:
+            self._tau = np.array(tau)
+
+    def __add__(self, curve):
+        return self.add(curve)
+
+    def __sub__(self, curve):
+        return self.sub(curve)
+
+    def __mul__(self, curve):
+        return self.mul(curve)
+
+    def __div__(self, curve):
+        return self.div(curve)
+
+    def __pow__(self, power):
+        pass
+
+    @property
+    def cpts(self):
+        return self._cpts
+
+    @cpts.setter
+    def cpts(self, value):
+        self._curve = None
+
+        newCpts = np.array(value, ndmin=2)
+
+        self._dim = newCpts.shape[0]
+        self._deg = newCpts.shape[1] - 1
+        self._cpts = newCpts
+
+    @property
+    def deg(self):
+        return self._deg
+
+    @property
+    def degree(self):
+        return self._deg
+
+    @property
+    def dim(self):
+        return self._dim
+
+    @property
+    def dimension(self):
+        return self._dim
+
+    @property
+    def tf(self):
+        return self._tf
+
+    @tf.setter
+    def tf(self, value):
+        self._tf = float(value)
+
+    @property
+    def tau(self):
+        return self._tau
+
+    @tau.setter
+    def tau(self, val):
+        self._curve = None
+        self._tau = val
+
+    @property
+    def x(self):
         """
-        Returns a Bezier object whose control points are the derivative of the
-        control points of the original object.
+        Returns a Bezier object whose control points are the 0th row of the
+        original object's control points.
         """
-        cpts = self._ctrlPts
-        cptsDotElev = mat.zeros(cpts.shape)
-        for i in range(self._dim):
-            cptsDot = cpts[i,:]*diffBez(self._deg)
-            cptsDotElev[i,:] = cptsDot*elevBez(self._deg-1)
-        return Bezier(cptsDotElev, self._tau)
-    
-    def normSquare(self):
+        return Bezier(self.cpts[0], tau=self.tau, tf=self.tf)
+
+    @property
+    def y(self):
         """
-        Returns a Bezier object for the norm squared result of the current
-        Bezier curve.
+        Returns a Bezier object whose control points are the 1st row of the
+        original object's control points. If the original object is less than
+        2 dimensions, this returns None.
         """
-        prodM = prodMatrix(self.deg)
-        return Bezier(_normSquare(self.ctrlPts, 1, self.dim, prodM))
-    
-    def elev(self, R=1):
+        if self.dim > 1:
+            return Bezier(self.cpts[1], tau=self.tau, tf=self.tf)
+        else:
+            return None
+
+    @property
+    def z(self):
         """
-        Elevates the degree of the Bezier curve by R (default is 1) and returns
-        a new, higher degree Bezier object.
+        Returns a Bezier object whose control points are the 2nd row of the
+        original object's control points. If the original object is less than
+        3 dimensions, this returns None.
         """
-        elevPts = np.vstack(
-                (cpts*elevBez(self.deg, R) for cpts in self._ctrlPts))
-        return Bezier(elevPts)
-    
-    def split(self, splitPoint):
+        if self.dim > 2:
+            return Bezier(self.cpts[2], tau=self.tau, tf=self.Tf)
+        else:
+            return None
+
+    @property
+    def curve(self):
+        if self._curve is None:
+            self._curve = np.zeros([self._dim, len(self._tau)])
+            for i, pts in enumerate(self.cpts):
+                self._curve[i] = bezierCurve(pts, self._tau)
+
+        return self._curve
+
+    def copy(self):
+        """Creates an exact, deep copy of the current Bezier object
+
+        :return: Deep copy of Bezier object
+        :rtype: Bezier
         """
-        Splits the Bezier curve at tau = splitPoint.
-        
-        This method uses the matrix representation of Bezier curves and can be
-        found at the following source:
-        https://pomax.github.io/bezierinfo/#matrixsplit
+        return Bezier(self.cpts, self.tau, self.tf)
+
+    def plot(self, axisHandle=None):
+        """Plots the Bezier curve in 1D or 2D
+
+        Note: Currently only supports plotting in 1D or 2D.
+
+        :param axisHandle: Handle to the figure axis. If it is None, a new
+            figure will be plotted.
+        :type axisHandle: matplotlib.axes._subplots.AxesSubplot or None
+        :return: Axis object where the curve was plotted.
+        :rtype: matplotlib.axes._subplots.AxesSubplot
         """
-        if splitPoint < 0 or splitPoint > 1:
-            errorMsg = (
-                    'Can only split the curve at a tau '
-                    'value between 0 and 1.'
-                    )
-            raise ValueError(errorMsg)
-        from sympy.abc import t
-        
-        try:
-            Q, Qp = Bezier.Q[self.deg]
-            
-        except KeyError:    
-            M = buildBezMatrix(self.deg)
-            Z = np.diag(createPowerBasisVector(self.deg))
-            Q = M.I * Z * M
-            
-            shiftedQ = np.vstack(
-                    (np.roll(m.A1, self.deg-i) for i, m in enumerate(Q)))
-            Qp = np.flip(shiftedQ, 0)
-            
-            Q = lambdify(t, Matrix(Q))
-            Qp = lambdify(t, Matrix(Qp))
-            
-            Bezier.Q[self.deg] = Q, Qp
-            
-        c1 = Q(splitPoint)*self.ctrlPts.T
-        c2 = Qp(splitPoint)*self.ctrlPts.T
-            
-        return Bezier(c1.T), Bezier(c2.T)
-    
-    def minMax(self):
+        if axisHandle is None:
+            fig = plt.figure()
+            ax = fig.add_subplot(1, 1, 1)
+        else:
+            ax = axisHandle
+
+        cpts = np.asarray(self.cpts)
+
+        if self.dim == 1:
+            ax.plot(self.tau, self.curve[0])
+            ax.plot(np.linspace(0, self.tf, self.deg+1), self.cpts)
+        elif self.dim == 2:
+            ax.plot(self.curve[0], self.curve[1])
+            ax.plot(cpts[0], cpts[1], '.--')
+        else:
+            print('WARNING: Only 1D and 2D Plotting are Supported for Now')
+
+        return ax
+
+    def add(self, other):
+        """Adds two Bezier curves
+
+        :param other: Other Bezier curve to be added
+        :type other: Bezier
+        :return: Sum of the two Bezier curves
+        :rtype: Bezier
         """
-        Finds the minimum and maximum values of the Bezier curve.
-        
-        Searches along the interval of 0-1 using the degree elevation method.
-        Note that this is a quick approximation and not guaranteed to generate
-        an exact estimate.
-        
-        In the future, GJK along with DeCasteljau's algorithm will be used to
-        converge to the actual values.
-        
-        RETURNS:
-            (minVal, maxVal) - Tuple of two matrix elements. The first matrix
-                is the minimum values, the second matrix is the maximum values.
-                The two matrix elements are column vectors whose length is
-                equal to the number of dimensions being used.
+        addedCpts = self.cpts + other.cpts
+        newCurve = self.copy()
+        newCurve.cpts = addedCpts
+        return newCurve
+
+    def sub(self, other):
+        """Subtracts two Bezier curves
+
+        :param other: Bezier curve to subtract from the original
+        :type other: Bezier
+        :return: Original curve - Other curve
+        :rtype: Bezier
         """
-        elevatedCurve = self.elev(self._deg*10)
-        
-        minVal = elevatedCurve.ctrlPts.min(axis=1)
-        maxVal = elevatedCurve.ctrlPts.max(axis=1)
-        
-        return (minVal, maxVal)
-    
-    def add(self, curve):
-        """
-        Adds two Bezier curves
-        """
-        if not isinstance(curve, Bezier):
-            msg = 'Both curves being added must be of type Bezier.'
-            raise TypeError(msg)
-            
-        cpts = self.ctrlPts + curve.ctrlPts
-        
-        return Bezier(cpts)
-    
-    def __add__(self, other):
-        return self.add(other)
-    
-    def sub(self, curve):
-        """
-        Subtracts two Bezier curves
-        """
-        if not isinstance(curve, Bezier):
-            msg = 'Both curves being subtracted must be of type Bezier.'
-            raise TypeError(msg)
-            
-        cpts = self.ctrlPts - curve.ctrlPts
-        
-        return Bezier(cpts)
-    
-    def __sub__(self, other):
-        return self.sub(other)
-    
-    def divide(self, denominator):
-        """
-        Divides one Bezier curve by another resulting in a rational Bezier
-        curve.
-        
-        RETURNS:
-            RationalBezier object resulting in the division of two Bezier
-                curves.
-        """
-        if not isinstance(denominator, Bezier):
-            msg = 'The denominator must be a Bezier object, not a %s'.format(
-                    type(denominator))
-            raise TypeError(msg)
-            
-        cpts = self.ctrlPts.astype(np.float64) / denominator.ctrlPts
-        weights = denominator.ctrlPts
-        
-        return RationalBezier(cpts, weights)
-    
-    def __div__(self, other):
-        return self.divide(other)
-    
-    def multiply(self, multiplicand):
-        """
-        Computes the product of two Bezier curves.
-        
+        subCpts = self.cpts - other.cpts
+        newCurve = self.copy()
+        newCurve.cpts = subCpts
+        return newCurve
+
+    def mul(self, multiplicand):
+        """Computes the product of two Bezier curves.
+
         Source: Section 5.1 of "The Bernstein Polynomial Basis: A Centennial
         Retrospective" by Farouki.
+
+        :param multiplicand: Multiplicand
+        :type multiplicand: Bezier
+        :return: Product of the two curve
+        :rtype: Bezier
         """
         if not isinstance(multiplicand, Bezier):
             msg = 'The multiplicand must be a Bezier object, not a %s'.format(
                     type(multiplicand))
             raise TypeError(msg)
-            
+
         dim = self.dim
         if multiplicand.dim != dim:
             msg = ('The dimension of both Bezier curves must be the same.\n'
-                   'The first dimension is {} and the second is {}'.format(dim,
-                                           multiplicand.dim))
+                   'The first dimension is {} and the second is {}'.format(
+                           dim, multiplicand.dim))
             raise ValueError(msg)
-            
+
         a = np.array(self.ctrlPts, dtype=np.float64, ndmin=2)
         b = np.array(multiplicand.ctrlPts, dtype=np.float64, ndmin=2)
         m = self.deg
         n = multiplicand.deg
-        
+
         c = np.empty((dim, m+n+1))
-        
+
         for d in range(dim):
             for k in np.arange(0, m+n+1):
                 summation = 0
                 for j in np.arange(max(0, k-n), min(m, k)+1):
-                    summation += binom(m, j)*binom(n, k-j)*a[d,j]*b[d,k-j]
-                c[d, k] = summation / binom(m+n, k)
-                
-        return Bezier(c)
-        
-    def __mul__(self, other):
-        return self.multiply(other)
-    
-    def __str__(self):
-        return "Bezier Curve with Control Points: {}".format(self.ctrlPts)
-    
-    def __repr__(self):
-        return "Bezier({}, {})".format(self._ctrlPts, self._tau)
-    
-class RationalBezier:
+                    summation += fastBinom(m, j)  \
+                                 * fastBinom(n, k-j)  \
+                                 * a[d, j]  \
+                                 * b[d, k-j]
+                c[d, k] = summation / fastBinom(m+n, k)
+
+        newCurve = self.copy()
+        newCurve.cpts = c
+
+        return newCurve
+
+    def div(self, denominator):
+        """Divides one Bezier curve by another.
+
+        The division of two Bezier curves results in a rational Bezier curve.
+
+        RETURNS:
+            RationalBezier object resulting in the division of two Bezier
+                curves.
+        :param denominator: Denominator of the division
+        :type denominator: Bezier
+        :return: Rational Bezier curve representing the division of the two
+            curves.
+        :rtype: RationalBezier
+        """
+        if not isinstance(denominator, Bezier):
+            msg = 'The denominator must be a Bezier object, not a %s'.format(
+                    type(denominator))
+            raise TypeError(msg)
+
+        cpts = self.ctrlPts.astype(np.float64) / denominator.ctrlPts
+        weights = denominator.ctrlPts
+
+        return RationalBezier(cpts, weights, tau=self.tau, tf=self.tf)
+
+    def elev(self, R=1):
+        """Elevates the degree of the Bezier curve
+
+        Elevates the degree of the Bezier curve by R (default is 1) and returns
+        a new, higher degree Bezier object.
+
+        :param R: Number of degrees to elevate the curve
+        :type R: int
+        :return: Elevated Bezier curve
+        :rtype: Bezier
+        """
+        try:
+            elevMat = Bezier.elevationMatrixCache[self.deg][R]
+        except KeyError:
+            elevMat = elevBez(self.deg, R)
+            Bezier.elevationMatrixCache[self.deg][R] = elevMat
+
+        elevPts = []
+        for cpts in self.cpts:
+            elevPts.append(np.dot(cpts, elevMat))
+
+        elevPts = np.vstack(elevPts)
+
+        curveElev = self.copy()
+        curveElev.cpts = elevPts
+
+        return curveElev
+
+    def diff(self):
+        """Calculates the derivative of the Bezier curve
+
+        Note that this does not affect the object. Instead it returns the
+        derivative.
+
+        :return: Derivative of the Bezier curve
+        :rtype: Bezier
+        """
+        try:
+            Dm = Bezier.diffMatrixCache[self.deg][self.tf]
+        except KeyError:
+            Dm = diffBez(self.deg, self.tf)
+            Bezier.diffMatrixCache[self.deg][self.tf] = Dm
+
+        cptsDot = []
+        for i in range(self.dim):
+            cptsDot.append(np.dot(self.cpts[i, :], Dm))
+
+        curveDot = self.copy()
+        curveDot.cpts = cptsDot
+
+        return curveDot.elev()
+
+    def normSquare(self):
+        """Calculates the norm squared of the Bezier curve
+
+        Returns a Bezier object for the norm squared result of the current
+        Bezier curve.
+
+        :return: Norm squared of the Bezier curve
+        :rtype: Bezier
+        """
+        try:
+            prodM = Bezier.productMatrixCache[self.deg]
+        except KeyError:
+            prodM = prodMatrix(self.deg)
+            Bezier.productMatrixCache[self.deg] = prodM
+
+        return Bezier(_normSquare(self.cpts, 1, self.dim, prodM),
+                      tau=self.tau, Tf=self.Tf)
+
+#    def split(self, splitPoint):
+#        """Splits the Bezier curve at tau = splitPoint.
+#
+#        This method uses the matrix representation of Bezier curves and can be
+#        found at the following source:
+#        https://pomax.github.io/bezierinfo/#matrixsplit
+#        """
+#        if splitPoint < 0 or splitPoint > 1:
+#            errorMsg = (
+#                    'Can only split the curve at a tau '
+#                    'value between 0 and 1.'
+#                    )
+#            raise ValueError(errorMsg)
+#        from sympy.abc import t
+#
+#        try:
+#            Q, Qp = Bezier.Q[self.deg]
+#
+#        except KeyError:
+#            M = buildBezMatrix(self.deg)
+#            Z = np.diag(createPowerBasisVector(self.deg))
+#            Q = M.I * Z * M
+#
+#            shiftedQ = np.vstack(
+#                    (np.roll(m.A1, self.deg-i) for i, m in enumerate(Q)))
+#            Qp = np.flip(shiftedQ, 0)
+#
+#            Q = lambdify(t, Matrix(Q))
+#            Qp = lambdify(t, Matrix(Qp))
+#
+#            Bezier.Q[self.deg] = Q, Qp
+#
+#        c1 = Q(splitPoint)*self.ctrlPts.T
+#        c2 = Qp(splitPoint)*self.ctrlPts.T
+#
+#        return (Bezier(c1.T, tau=self.tau, Tf=self.Tf),
+#                Bezier(c2.T, tau=self.tau, Tf=self.Tf))
+
+
+class RationalBezier(BezierParams):
+    """Rational Bezier curve for trajectory generation
+
     """
-    Rational Bezier curve class
-    
-    Create a rational Bezier curve. A rational Bezier curve is defined by the
-    following equation:
-        B(t) = SUM(i=0, n)[ b_{i,n}(t) * P_i * w_i ] 
-               ------------------------------------
-                  SUM(i=0, n)[ b_{i,n}(t) * w_i ]
-    Where b_{i,n} is the ith term for an n degree Bernstein basis polynomial,
-    P_i is the ith control point of the Bezier curve in the numerator, and w_i
-    is the ith weight. The weight, w_i, is defined by the control points of the
-    Bezier curve in the denominator.
-    """
-    def __init__(self, ctrlPts=None, weights=None, tau=None):
-        if ctrlPts is not None and weights is not None:
-            # Want ndmin=2 so that we can treat the arrays like 2D matrices
-            self._ctrlPts = np.array(ctrlPts, dtype=np.float64, ndmin=2)
-            self._weights = np.array(weights, dtype=np.float64, ndmin=2)
-            
-            if ctrlPts.size != weights.size:
-                msg = 'Control points and weights arrays must be the same size.'
-                raise ValueError(msg)
-            
-            # Initialize degree and dimension
-            self.dim = self._ctrlPts.shape[0]
-            self.deg = self._ctrlPts.shape[1] - 1
-        else:
-            self.dim = None
-            self.deg = None            
-            
-        # Set a default value for tau if it is not passed in
-        if tau is None:
-            self._tau = np.arange(0, 1.01, 0.01)
-        else:
-            self._tau = np.array(tau)
-            
-    def __repr__(self):
-        return "RationalBezier({}, {}, {})".format(self._ctrlPts,
-                              self._weights, self._tau)
-        
-    @property
-    def ctrlPts(self):
-        return self._ctrlPts
-    
-    @ctrlPts.setter
-    def ctrlPts(self, value):
-        self._curve = None
-        self._ctrlPts = np.array(value, dtype=np.float64, ndmin=2)
-        
-    @property
-    def weights(self):
-        return self._weights
-    
-    @weights.setter
-    def weights(self, value):
-        self._curve = None
-        self._weights = np.array(value, dtype=np.float64, ndmin=2)
-        
+    def __init__(self, cpts=None, weights=None, tau=None, tf=1.0):
+        super().__init__(cpts, tau, tf)
+        self._weights = weights
+
 
 def bezierCurve(cpts, tau):
-    """
+    """Computes the values of a 1D Bezier curve defined by the control points.
+
     Creates a 1 dimensional Bezier curve using the designated control points
     and values of tau.
-    
-    All the symbolic matrix math is done using numpy matrices. Need to convert
-    to sympy matrix for evaluating the expression otherwise recursion errors
-    will occur.
-    
+
     Effectively evaluates the following expression:
         T*M*P
     Where
     T is the power basis vector [1 t t^2 t^3 ... t^N]
     M is the binomial matrix (more information found in buildBezMatrix)
     P is a vector of Bezier weights (i.e. control points)
-    
-    INPUTS:
-        cpts (1 x N+1 numpy.mat) - Single row matrix of N+1 control points for
+
+    :param cpts: Single row matrix of N+1 control points for
         a one dimensional Bezier curve.
-        
-        tau (numpy.array) - Values at which to evaluate Bezier curve. Should
+    :type cpts: numpy.ndarray
+    :param tau: Values at which to evaluate Bezier curve. Should
         typically only be on the range of [0,1] but it should work if it's not
         on that range.
-        
-    RETURNS:
-        curve(tau) (numpy.array) - Numpy array of length tau of the Bezier
-        curve evaluated at each value of tau.
+    :type tau: numpy.ndarray
+    :return: Numpy array of length tau of the Bezier curve evaluated at each
+        value of tau.
+    :rtype: numpy.ndarray
     """
-    from sympy.abc import t
-    tau = np.array(tau)
-
-    cpts = mat.mat(cpts)
+    cpts = np.array(cpts)
+    tau = np.array(tau, dtype=np.float64)
+    tauLen = tau.size
     n = cpts.size-1
-    coeffs = buildBezMatrix(n)
-    expr = createPowerBasisVector(n) * coeffs * cpts.T
-    curve = lambdify(t, Matrix(expr), 'numpy')
-    
-    return curve(tau)
+    curve = np.empty(tauLen)
 
+    coeffs = buildBezMatrix(n)
+    for i, t in enumerate(tau):
+        powerBasis = np.power(t, range(n+1))
+        curve[i] = np.dot(powerBasis, np.dot(coeffs, cpts.T))
+
+    return curve
+
+
+@numba.jit(nopython=True)
 def buildBezMatrix(n):
-    """
-    Builds a matrix of coefficients of the power basis to a Bernstein
+    """Builds a matrix of coefficients of the power basis to a Bernstein
     polynomial.
-    
+
     The coefficients matrix allows us to represent a Bezier curve of arbitrary
     degree as a matrix. This is useful for computational efficiency and ease of
     calculations.
-    
+
     Taken from the source:
     "Since the power basis {1, t, t^2, t^3, ...} forms a basis for the space of
      polynomials of degree less than or equal to n, any Bernstein polynomial of
      degree n can be written in terms of the power basis."
-    
+
     Source:
         http://graphics.cs.ucdavis.edu/education/CAGDNotes/CAGDNotes/
         Bernstein-Polynomials/Bernstein-Polynomials.html#conversion
+
+    :param n: Degree of the Bezier curve
+    :type n: int
+    :return: Power basis matrix of coefficients for a Bezier curve
+    :rtype: numpy.ndarray
     """
-    bezMatrix = mat.zeros((n+1, n+1))
-    
+    bezMatrix = np.zeros((n+1, n+1))
+
     for k in np.arange(0, n+1):
         for i in np.arange(k, n+1):
-            bezMatrix[k, i] = (-1)**(i-k) * binom(n, i) * binom(i, k)
-            
-    return bezMatrix.T
+            bezMatrix[i, k] = (-1)**(i-k) * fastBinom(n, i) * fastBinom(i, k)
 
-def createPowerBasisVector(n):
-    """
-    Creates a simple power vector in the form of:
-        [1, t, t^2, t^3, ..., t^n]
-    """
-    from sympy.abc import t
-    
-    return np.power(t, range(n+1))
+    return bezMatrix
 
-def diffBez(N, tf=1):
+
+@numba.jit(nopython=True)
+def diffBez(n, tf=1.0):
     """
     Takes the derivative of the control points for a Bezier curve. The
     resulting control points can be used to construct a Bezier curve that is
     the derivative of the original.
+
+    :param n: Degree of the Bezier curve
+    :type n: int
+    :param tf: Final time for the Bezier trajectory
+    :type tf: float
+    :return: Differentiation matrix for a Bezier curve of degree n
+    :rtype: numpy.ndarray
     """
-    Dm = N * (np.vstack([mat.zeros(N), mat.identity(N)]) -
-        np.vstack([mat.identity(N), mat.zeros(N)]))
-    
+    val = n/tf
+    Dm = np.zeros((n+1, n))
+    for i in range(n):
+        Dm[i, i] = -val
+        Dm[i+1, i] = val
+
     return Dm
 
+
+@numba.jit(nopython=True)
 def elevBez(N, R=1):
-    """
+    """Creates an elevation matrix for a Bezier curve.
+
     Creates a matrix to elevate a Bezier curve of degree N to degree N+R.
     The elevation is performed as such:
         B_(N)*T = B_(N+1) where * is the dot product.
+
+    :param N: Degree of the Bezier curve being elevated
+    :type N: int
+    :param R: Number of degrees to elevate the Bezier curve
+    :type R: int
+    :return: Elevation matrix to raise a Bezier curve of degree N by R degrees
+    :rtype: numpy.ndarray
     """
-    T = mat.zeros((N+1, N+R+1))
+    T = np.zeros((N+1, N+R+1))
     for i in range(N+R+1):
         for j in range(N+1):
-            T[j,i] = binom(N,j) * binom(R,i-j) / binom(N+R,i)
-            
+            T[j, i] = fastBinom(N, j) * fastBinom(R, i-j) / fastBinom(N+R, i)
+
     return T
 
+
+@numba.jit(nopython=True)
 def prodMatrix(N):
-    """
+    """Produces a product matrix for obtaining the norm of a Bezier curve
+
     This function produces a matrix which can be used to compute ||x dot x||^2
     i.e. xaug = x'*x;
     xaug = reshape(xaug',[length(x)^2,1]);
     y = Prod_T*xaug;
     or simply norm_square(x)
     prodM is the coefficient of bezier multiplication.
-    
+
     Code ported over from Venanzio Cichella's MATLAB Prod_Matrix function.
+
+    :param N: Degree of the Bezier curve
+    :type N: int
+    :return: Product matrix
+    :rtype: numpy.ndarray
     """
-    T = mat.zeros((2*N+1, (N+1)**2))
-    
+    T = np.zeros((2*N+1, (N+1)**2))
+
     for j in np.arange(2*N+1):
-        for i in np.arange(max([0, j-N]), min(N,j)+1):
+        den = fastBinom(2*N, j)
+        for i in np.arange(max(0, j-N), min(N, j)+1):
             if N >= i and N >= j-i and 2*N >= j and j-i >= 0:
-                T[j, N*i+j] = binom(N,i)*binom(N,j-i) / binom(2*N,j)
+                T[j, N*i+j] = fastBinom(N, i)*fastBinom(N, j-i) / den
 
     return T
 
-def _normSquare(x, Nveh, Ndim, prodM):
+
+@numba.jit(nopython=True)
+def fastBinom(n, k):
+    """Quickly computes the binomial coefficients.
+
+    A fast way to calculate binomial coefficients by Andrew Dalke.
+    See http://stackoverflow.com/questions/3025162/
+        statistics-combinations-in-python
+
+    :param n: n portion of "n choose k"
+    :type n: int
+    :param k: k portion of "n choose k"
+    :type k: int
+    :return: binomial coefficient of n choose k
+    :rtype: int
     """
-    Compute the control points of the square of the norm of a vector
-    
+    if 0 <= k <= n:
+        ntok = 1
+        ktok = 1
+        for t in range(1, min(k, n-k) + 1):
+            ntok *= n
+            ktok *= t
+            n -= 1
+        return ntok // ktok
+    else:
+        return 0
+
+
+def _normSquare(x, Nveh, Ndim, prodM):
+    """Compute the control points of the square of the norm of a vector
+
     normSquare(x, Nveh, Ndim, prodM)
-    
-    INPUT: Ndim*Nveh by N matrix x = [x1,...,x_Nveh)], x_i \in R^Ndim
+
+    INPUT: Ndim*Nveh by N matrix x = [x1,...,x_Nveh)], x_i in R^Ndim
     OUTPUT: control points of ||x_i||^2 ... Nveh by N matrix
-    
+
     Code ported over from Venanzio Cichella's MATLAB norm_square function.
     NOTE: This only works on 1D or 2D matricies. It will fail for 3 or more.
     """
     x = np.array(x)
     if x.ndim == 1:
         x = x[None]
-        
+
     m, N = x.shape
-        
-    xsquare = np.zeros((m,prodM.shape[0]))
-    
+
+    xsquare = np.zeros((m, prodM.shape[0]))
+
     for i in range(m):
-        xaug = np.dot(x[i,None].T, x[i,None])
-        xnew = xaug.reshape((N**2,1))
+        xaug = np.dot(x[i, None].T, x[i, None])
+        xnew = xaug.reshape((N**2, 1))
         xsquare[i, :] = np.dot(prodM, xnew).T[0]
-        
+
     S = np.zeros((Nveh, Nveh*Ndim))
-    
+
     for i in range(Nveh):
         for j in range(Ndim):
             S[i, Ndim*i+j] = 1
-            
+
     return np.dot(S, xsquare)
 
-def angularRate(bezTraj):
-    """
-    Finds the angular rate of the 2D Bezier Curve.
-    
-    The equation for the angular rate is as follows:
-        psiDot = (yDdot*xDot - xDdot*yDot) / (xDot^2 + yDot^2)
-        Note the second derivative (Ddot) vs the first (Dot)
-    
-    RETURNS:
-        RationalBezier - This function returns a rational Bezier curve because
-            we must divide two Bezier curves.
-    """
-    if bezTraj.dim != 2:
-        msg = ('The input curve must be two dimensional,\n'
-               'instead it is {} dimensional'.format(bezTraj.dim))
-        raise ValueError(msg)
-    
-    # We add epsilon to the denominator to avoid divide by zero errors
-    eps = np.finfo(np.float64).eps
-    
-    x = Bezier(bezTraj.ctrlPts[0,:])
-    xDot = x.diff()
-    xDdot = xDot.diff()
-    
-    y = Bezier(bezTraj.ctrlPts[1,:])
-    yDot = y.diff()
-    yDdot = yDot.diff()
-    
-    numerator = yDdot*xDot - xDdot*yDot
-    denominator = xDot*xDot + yDot*yDot
-    
-    cpts = numerator.ctrlPts / (denominator.ctrlPts+eps)
-    weights = denominator.ctrlPts
-    
-    return RationalBezier(cpts, weights)
 
-def angularRateSqr(bezTraj):
-    """
-    Finds the squared angular rate of the 2D Bezier Curve.
-    
-    The equation for the angular rate is as follows:
-        psiDot = ((yDdot*xDot - xDdot*yDot))^2 / (xDot^2 + yDot^2)^2
-        Note the second derivative (Ddot) vs the first (Dot)
-    
-    RETURNS:
-        RationalBezier - This function returns a rational Bezier curve because
-            we must divide two Bezier curves.
-    """
-    if bezTraj.dim != 2:
-        msg = ('The input curve must be two dimensional,\n'
-               'instead it is {} dimensional'.format(bezTraj.dim))
-        raise ValueError(msg)
-    
-    # We add epsilon to the denominator to avoid divide by zero errors
-    eps = np.finfo(np.float64).eps
-    
-    x = Bezier(bezTraj.ctrlPts[0,:])
-    xDot = x.diff()
-    xDdot = xDot.diff()
-    
-    y = Bezier(bezTraj.ctrlPts[1,:])
-    yDot = y.diff()
-    yDdot = yDot.diff()
-    
-    numerator = yDdot*xDot - xDdot*yDot
-    numerator = numerator*numerator
-    denominator = xDot*xDot + yDot*yDot
-    denominator = denominator*denominator
-    
-    cpts = numerator.ctrlPts / (denominator.ctrlPts+eps)
-    weights = denominator.ctrlPts
-    
-    return RationalBezier(cpts, weights)
 
-if __name__ == "__main__":
-    """
-    Example code
-    """
-    import matplotlib.pyplot as plt
-    plt.close('all')
-    
-    # Constant values
-    NUM_VEH = 2 # Number of vehicles
-    DIM = 2 # Dimension of the trajectories (usually 2D or 3D)
-    
-    # Optimal control points for 2 vehicles have been pre-computed
-    vehCpts1 = [ 
-            [0., 0., 0.19777111, 0.50000004, 0.80222879, 1., 1.],
-            [0., 0.60602932, 1.21951607, 1.86339207, 2.88618266, 3.9393627, 5.]
-            ]
-    
-    vehCpts2 = [
-            [1., 1., 0.80222874, 0.50000022, 0.19777105, 0., 0.],
-            [0., 1.06063715, 2.11381678, 3.13660759, 3.78048357, 4.3939704, 5.]
-            ]
-    
-    """
-    Plotting Trajectories
-    """
-    # Create the Bezier curves that represent the trajectories
-    vehTraj1 = Bezier(vehCpts1)
-    vehTraj2 = Bezier(vehCpts2)
-    
-    # Plot the trajectories
-    plt.figure(1)
-    plt.plot(vehTraj1.curve[0], vehTraj1.curve[1], 'b-',
-             vehTraj1.ctrlPts[0], vehTraj1.ctrlPts[1], 'b.--')
-    plt.plot(vehTraj2.curve[0], vehTraj2.curve[1], 'r-',
-             vehTraj2.ctrlPts[0], vehTraj2.ctrlPts[1], 'r.--')
-    plt.title('Vehicle Trajectories', fontsize=28)
-    plt.xlabel('X Position', fontsize=20)
-    plt.ylabel('Y Position', fontsize=20)
-    
-    """
-    Plotting Velocities
-    """
-    # Take the derivative of the trajectories to get velocities
-    vehVel1 = vehTraj1.diff().normSquare()
-    vehVel2 = vehTraj2.diff().normSquare()
-    
-    # Plot the velocities
-    plt.figure(2)
-    plt.plot(vehVel1.tau, vehVel1.curve[0], 'b-',
-             np.linspace(0, 1, vehVel1.deg+1),
-             np.asarray(vehVel1.ctrlPts).squeeze(), 'b.--')
-    plt.plot(vehVel2.tau, vehVel2.curve[0], 'r-',
-             np.linspace(0, 1, vehVel2.deg+1),
-             np.asarray(vehVel2.ctrlPts).squeeze(), 'r.--')
-    plt.title('Vehicle Velocities', fontsize=28)
-    plt.xlabel('Tau', fontsize=20)
-    plt.ylabel('$Velocity^2$', fontsize=20)
-    
-    """
-    Plotting Accelerations
-    """
-    # Take the derivative of the velocities to get accelerations
-    vehAccel1 = vehVel1.diff().normSquare()
-    vehAccel2 = vehVel2.diff().normSquare()
-    
-    # Plot the velocities
-    plt.figure(3)
-    plt.plot(vehAccel1.tau, vehAccel1.curve[0], 'b-',
-             np.linspace(0, 1, vehAccel1.deg+1),
-             np.asarray(vehAccel1.ctrlPts).squeeze(), 'b.--')
-    plt.plot(vehAccel2.tau, vehAccel2.curve[0], 'r-',
-             np.linspace(0, 1, vehAccel2.deg+1),
-             np.asarray(vehAccel2.ctrlPts).squeeze(), 'r.--')
-    plt.title('Vehicle Accelerations', fontsize=28)
-    plt.xlabel('Tau', fontsize=20)
-    plt.ylabel('$Acceleration^2$', fontsize=20)
-    
-    """
-    Plotting Separation
-    """
-    vehList = [vehTraj1, vehTraj2]
-    distVeh = []
-    for i in range(NUM_VEH):
-            for j in range(i, NUM_VEH):
-                if j>i:
-                    dv = Bezier(vehList[i].ctrlPts -
-                        vehList[j].ctrlPts)
-                    distVeh.append(dv.normSquare().elev(10))
-                    
-    plt.figure(4)
-    plt.title('Squared Distances', fontsize=28)
-    for dist in distVeh:
-        plt.plot(dist._tau, dist.curve.squeeze())
-        plt.plot(np.linspace(0,1,dist.deg+1),
-                 np.asarray(dist.ctrlPts).squeeze(), '.')
-    plt.xlabel('Tau', fontsize=16)
-    plt.ylabel('$Distance^2$', fontsize=20)
-    
-    """
-    Approximating Angular Rate
-    
-    The equation for the angular rate is as follows:
-        psiDot = (yDdot*xDot - xDdot*yDot) / (xDot^2 + yDot^2)
-        Note the second derivative (Ddot) vs the first (Dot)
-    """
-    # To approximate the angular rate of both vehicles, we will first elevate
-    # the degree of the trajectories. We do this because as the degree gets
-    # higher, the control points approach the actual curve. An arbitrary value
-    # of 30 is used to elevate the curves. That means that the final degree
-    # of each curve will be 30 + original degree
-    elevTraj1 = vehTraj1.elev(30)
-    elevTraj2 = vehTraj2.elev(30)
-    
-    # Calculate the angular rates. For optimization, we want to square of the
-    # angular rates so that we only need a positive maximum constraint rather
-    # than positive maximum and negative minimum constraints
-    angularRateSqr1 = angularRateSqr(elevTraj1)
-    angularRateSqr2 = angularRateSqr(elevTraj2)
-    
-    # Plot the approximate angular rate
-    plt.figure(5)
-    plt.title('Approximate Squared Angular Rates')
-    plt.plot(np.linspace(0, 1, angularRateSqr1.deg+1),
-             np.asarray(angularRateSqr1.ctrlPts).squeeze(), 'b.-')
-    plt.plot(np.linspace(0, 1, angularRateSqr2.deg+1),
-             np.asarray(angularRateSqr2.ctrlPts).squeeze(), 'r.-')
-    plt.xlabel('Tau', fontsize=16)
-    plt.ylabel('$Angular$ $Rate^2$', fontsize=20)
-    
-    plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
