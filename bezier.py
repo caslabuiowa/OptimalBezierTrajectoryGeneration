@@ -113,24 +113,10 @@ class Bezier(BezierParams):
     elevationMatrixCache = defaultdict(dict)
     productMatrixCache = dict()
     diffMatrixCache = defaultdict(dict)
+    bezCoefCache = defaultdict(dict)
 
     def __init__(self, cpts=None, tau=None, tf=1.0):
         super().__init__(cpts=cpts, tau=tau, tf=tf)
-#        self._tf = float(tf)
-#        self._curve = None
-#
-#        if cpts is not None:
-#            self._cpts = np.array(cpts, ndmin=2)
-#            self._dim = self._cpts.shape[0]
-#            self._deg = self._cpts.shape[1] - 1
-#        else:
-#            self._dim = None
-#            self._deg = None
-#
-#        if tau is None:
-#            self._tau = np.arange(0, 1.01, 0.01)
-#        else:
-#            self._tau = np.array(tau)
 
     def __add__(self, curve):
         return self.add(curve)
@@ -149,53 +135,6 @@ class Bezier(BezierParams):
 
     def __repr__(self):
         return 'Bezier({}, {}, {})'.format(self.cpts, self.tau, self.tf)
-
-#    @property
-#    def cpts(self):
-#        return self._cpts
-#
-#    @cpts.setter
-#    def cpts(self, value):
-#        self._curve = None
-#
-#        newCpts = np.array(value, ndmin=2)
-#
-#        self._dim = newCpts.shape[0]
-#        self._deg = newCpts.shape[1] - 1
-#        self._cpts = newCpts
-#
-#    @property
-#    def deg(self):
-#        return self._deg
-#
-#    @property
-#    def degree(self):
-#        return self._deg
-#
-#    @property
-#    def dim(self):
-#        return self._dim
-#
-#    @property
-#    def dimension(self):
-#        return self._dim
-#
-#    @property
-#    def tf(self):
-#        return self._tf
-#
-#    @tf.setter
-#    def tf(self, value):
-#        self._tf = float(value)
-#
-#    @property
-#    def tau(self):
-#        return self._tau
-#
-#    @tau.setter
-#    def tau(self, val):
-#        self._curve = None
-#        self._tau = val
 
     @property
     def x(self):
@@ -267,7 +206,7 @@ class Bezier(BezierParams):
 
         if self.dim == 1:
             ax.plot(self.tau, self.curve[0])
-            ax.plot(np.linspace(0, self.tf, self.deg+1), self.cpts)
+            ax.plot(np.linspace(0, self.tf, self.deg+1), self.cpts.squeeze())
         elif self.dim == 2:
             ax.plot(self.curve[0], self.curve[1])
             ax.plot(cpts[0], cpts[1], '.--')
@@ -332,15 +271,24 @@ class Bezier(BezierParams):
 
         c = np.empty((dim, m+n+1))
 
+        try:
+            coefMat = Bezier.bezCoefCache[m][n]
+        except KeyError:
+            coefMat = bezProductCoefficients(m, n)
+            Bezier.bezCoefCache[m][n] = coefMat
+
         for d in range(dim):
-            for k in np.arange(0, m+n+1):
-                summation = 0
-                for j in np.arange(max(0, k-n), min(m, k)+1):
-                    summation += binom(m, j)  \
-                                 * binom(n, k-j)  \
-                                 * a[d, j]  \
-                                 * b[d, k-j]
-                c[d, k] = summation / binom(m+n, k)
+            c[d] = multiplyBezCurves(a[d], b[d], coefMat)
+
+#        for d in range(dim):
+#            for k in np.arange(0, m+n+1):
+#                summation = 0
+#                for j in np.arange(max(0, k-n), min(m, k)+1):
+#                    summation += binom(m, j)  \
+#                                 * binom(n, k-j)  \
+#                                 * a[d, j]  \
+#                                 * b[d, k-j]
+#                c[d, k] = summation / binom(m+n, k)
 
         newCurve = self.copy()
         newCurve.cpts = c
@@ -362,8 +310,9 @@ class Bezier(BezierParams):
         :rtype: RationalBezier
         """
         if not isinstance(denominator, Bezier):
-            msg = 'The denominator must be a Bezier object, not a %s'.format(
-                    type(denominator))
+            msg = ('The denominator must be a Bezier object, not a %s. '
+                   'Or the module has been reloaded.').format(
+                           type(denominator))
             raise TypeError(msg)
 
         cpts = self.cpts.astype(np.float64) / denominator.cpts
@@ -635,13 +584,28 @@ def prodMatrix(N):
 
 
 @numba.jit
-def multiplyBezCurves(multiplier, multiplicand):
+def multiplyBezCurves(multiplier, multiplicand, coefMat=None):
     """Multiplies two Bezier curves together
+
+    The product of two Bezier curves can be computed directly from their
+    control points. This function specifically uses matrix multiplication to
+    increase the speed of the multiplication.
+
+    Note that this function is made for 1D control points.
+
+    One can pass in a matrix of product coefficients to compute the product
+    about 10x faster. It is recommended that the coefficient matrix is
+    precomputed and saved in memory when performing multiplication many times.
+    The function bezProductCoefficients will produce this matrix.
 
     :param multiplier: Control points of the multiplier curve. Single dimension
     :type multiplier: numpy.ndarray
     :param multiplicand: Control points of the multiplicand curve.
     :type multiplicand: numpy.ndarray
+    :param coefMat: Precomputed coefficient matrix from bezProductCoefficients
+    :type coefMat: numpy.ndarray or None
+    :return: Product of two Bezier curves
+    :rtype: numpy.ndarray
     """
     multiplier = np.atleast_2d(multiplier)
     multiplicand = np.atleast_2d(multiplicand)
@@ -651,26 +615,24 @@ def multiplyBezCurves(multiplier, multiplicand):
     augMat = np.dot(multiplier.T, multiplicand)
     newMat = augMat.reshape((1, -1))
 
-    coefMat = bezProductCoefficients(m, n)
+    if coefMat is None:
+        coefMat = bezProductCoefficients(m, n)
 
     return np.dot(newMat, coefMat)
 
 
 @numba.jit
 def bezProductCoefficients(m, n):
-    """Produces a product matrix for obtaining the norm of a Bezier curve
+    """Produces a product matrix for obtaining the product of two Bezier curves
 
-    This function produces a matrix which can be used to compute ||x dot x||^2
-    i.e. xaug = x'*x;
-    xaug = reshape(xaug',[length(x)^2,1]);
-    y = Prod_T*xaug;
-    or simply norm_square(x)
-    prodM is the coefficient of bezier multiplication.
+    This function computes the matrix of coefficients for multiplying two
+    Bezier curves. This function exists so that the coefficients matrix can be
+    computed ahead of time when performing many multiplications.
 
-    Code ported over from Venanzio Cichella's MATLAB Prod_Matrix function.
-
-    :param N: Degree of the Bezier curve
-    :type N: int
+    :param m: Degree of the first Bezier curve
+    :type m: int
+    :param n: Degree of the second Bezier curve
+    :type n: int
     :return: Product matrix
     :rtype: numpy.ndarray
     """
@@ -681,14 +643,6 @@ def bezProductCoefficients(m, n):
         den = binom(m+n, k)
         for j in range(max(0, k-n), min(m, k)+1):
             coefMat[m*j+k, k] = binom(m, j)*binom(n, k-j)/den
-
-#    T = np.zeros((2*N+1, (N+1)**2))
-#
-#    for j in np.arange(2*N+1):
-#        den = binom(2*N, j)
-#        for i in np.arange(max(0, j-N), min(N, j)+1):
-#            if N >= i and N >= j-i and 2*N >= j and j-i >= 0:
-#                T[j, N*i+j] = binom(N, i)*binom(N, j-i) / den
 
     return coefMat
 # TODO
@@ -839,6 +793,20 @@ def angularRateSqr(bezTraj):
     numerator = numerator*numerator
     denominator = xDot*xDot + yDot*yDot
     denominator = denominator*denominator
+
+#    try:
+#        coefMat = Bezier.bezCoefCache[m][n]
+#    except KeyError:
+#        coefMat = bezProductCoefficients(m, n)
+#        Bezier.bezCoefCache[m][n] = coefMat
+#
+#    for d in range(dim):
+#        c[d] = multiplyBezCurves(a[d], b[d])
+#
+#    numerator = yDdot*xDot - xDdot*yDot
+#    numerator = numerator*numerator
+#    denominator = xDot*xDot + yDot*yDot
+#    denominator = denominator*denominator
 
     cpts = numerator.cpts / (denominator.cpts)
     weights = denominator.cpts
