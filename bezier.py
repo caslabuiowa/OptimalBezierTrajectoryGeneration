@@ -12,8 +12,6 @@ import matplotlib.pyplot as plt
 import numba
 import numpy as np
 from scipy.special import binom
-# from sympy import lambdify, Matrix
-# from sympy.solvers import solve
 
 
 class BezierParams:
@@ -280,6 +278,8 @@ class Bezier(BezierParams):
         for d in range(dim):
             c[d] = multiplyBezCurves(a[d], b[d], coefMat)
 
+#   This code uses Farouki's method for multiplication but does not simplify
+#   the problem using matrices.
 #        for d in range(dim):
 #            for k in np.arange(0, m+n+1):
 #                summation = 0
@@ -390,6 +390,9 @@ class Bezier(BezierParams):
         return Bezier(_normSquare(self.cpts, 1, self.dim, prodM),
                       tau=self.tau, tf=self.tf)
 
+# TODO: Create a split function that doesn't use the symbolic library so that
+#        it runs quicker.
+#
 #    def split(self, splitPoint):
 #        """Splits the Bezier curve at tau = splitPoint.
 #
