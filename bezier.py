@@ -29,6 +29,7 @@ class BezierParams:
     :type tf: float
     """
     def __init__(self, cpts=None, tau=None, tf=1.0):
+        self._tau = tau
         self._tf = float(tf)
         self._curve = None
 
@@ -39,11 +40,6 @@ class BezierParams:
         else:
             self._dim = None
             self._deg = None
-
-        if tau is None:
-            self._tau = np.arange(0, 1.01, 0.01)
-        else:
-            self._tau = np.array(tau)
 
     @property
     def cpts(self):
@@ -85,6 +81,10 @@ class BezierParams:
 
     @property
     def tau(self):
+        if self._tau is None:
+            self._tau = np.arange(0, 1.01, 0.01)
+        else:
+            self._tau = np.array(self._tau)
         return self._tau
 
     @tau.setter
@@ -171,9 +171,9 @@ class Bezier(BezierParams):
     @property
     def curve(self):
         if self._curve is None:
-            self._curve = np.zeros([self._dim, len(self._tau)])
+            self._curve = np.zeros([self.dim, len(self.tau)])
             for i, pts in enumerate(self.cpts):
-                self._curve[i] = bezierCurve(pts, self._tau)
+                self._curve[i] = bezierCurve(pts, self.tau)
 
         return self._curve
 
@@ -722,93 +722,3 @@ def _normSquare(x, Nveh, Ndim, prodM):
             S[i, Ndim*i+j] = 1
 
     return np.dot(S, xsquare)
-
-
-def angularRate(bezTraj):
-    """
-    Finds the angular rate of the 2D Bezier Curve.
-
-    The equation for the angular rate is as follows:
-        psiDot = (yDdot*xDot - xDdot*yDot) / (xDot^2 + yDot^2)
-        Note the second derivative (Ddot) vs the first (Dot)
-
-    RETURNS:
-        RationalBezier - This function returns a rational Bezier curve because
-            we must divide two Bezier curves.
-    """
-    if bezTraj.dim != 2:
-        msg = ('The input curve must be two dimensional,\n'
-               'instead it is {} dimensional'.format(bezTraj.dim))
-        raise ValueError(msg)
-
-    # We add epsilon to the denominator to avoid divide by zero errors
-#    eps = np.finfo(np.float64).eps
-
-    x = Bezier(bezTraj.cpts[0, :], tf=bezTraj.tf)
-    xDot = x.diff()
-    xDdot = xDot.diff()
-
-    y = Bezier(bezTraj.cpts[1, :], tf=bezTraj.tf)
-    yDot = y.diff()
-    yDdot = yDot.diff()
-
-    numerator = yDdot*xDot - xDdot*yDot
-    denominator = xDot*xDot + yDot*yDot
-
-    cpts = numerator.cpts / (denominator.cpts)
-    weights = denominator.cpts
-
-    return RationalBezier(cpts, weights)
-
-
-def angularRateSqr(bezTraj):
-    """
-    Finds the squared angular rate of the 2D Bezier Curve.
-
-    The equation for the angular rate is as follows:
-        psiDot = ((yDdot*xDot - xDdot*yDot))^2 / (xDot^2 + yDot^2)^2
-        Note the second derivative (Ddot) vs the first (Dot)
-
-    RETURNS:
-        RationalBezier - This function returns a rational Bezier curve because
-            we must divide two Bezier curves.
-    """
-    if bezTraj.dim != 2:
-        msg = ('The input curve must be two dimensional,\n'
-               'instead it is {} dimensional'.format(bezTraj.dim))
-        raise ValueError(msg)
-
-    # We add epsilon to the denominator to avoid divide by zero errors
-#    eps = np.finfo(np.float64).eps
-
-    x = bezTraj.x  # Bezier(bezTraj.cpts[0,:], tf=bezTraj.tf)
-    xDot = x.diff()
-    xDdot = xDot.diff()
-
-    y = bezTraj.y  # Bezier(bezTraj.cpts[1,:], tf=bezTraj.tf)
-    yDot = y.diff()
-    yDdot = yDot.diff()
-
-    numerator = yDdot*xDot - xDdot*yDot
-    numerator = numerator*numerator
-    denominator = xDot*xDot + yDot*yDot
-    denominator = denominator*denominator
-
-#    try:
-#        coefMat = Bezier.bezCoefCache[m][n]
-#    except KeyError:
-#        coefMat = bezProductCoefficients(m, n)
-#        Bezier.bezCoefCache[m][n] = coefMat
-#
-#    for d in range(dim):
-#        c[d] = multiplyBezCurves(a[d], b[d])
-#
-#    numerator = yDdot*xDot - xDdot*yDot
-#    numerator = numerator*numerator
-#    denominator = xDot*xDot + yDot*yDot
-#    denominator = denominator*denominator
-
-    cpts = numerator.cpts / (denominator.cpts)
-    weights = denominator.cpts
-
-    return RationalBezier(cpts, weights)
