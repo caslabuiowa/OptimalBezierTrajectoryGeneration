@@ -1,26 +1,27 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Thu Jan 24 14:17:17 2019
+Created on Mon Jan 28 08:31:14 2019
 
 @author: ckielasjensen
 """
 
 import scipy.optimize as sop
 import numpy as np
+from multiprocessing import Pool
 # import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import time
 import collections
-import pickle
-import uuid
+import os
+import pandas as pd
 
 import optimization as opt
 import bezier as bez
 
 DIM = 2
-DEG = 6                     # Must be >= 4
+DEG = 10                    # Must be >= 4
 MIN_ELEM = 'euclidean'
 SEED = None                 # Set to None for true random
 OUTER_CIR_R = 250           # (m)
@@ -33,7 +34,8 @@ MAX_SPEED = 32              # (m/s)
 MAX_ANG_RATE = 0.2          # (rad/s)
 CONS_TIME = 150             # Conservative time added to the minimum time (s)
 OUTER2INNER_TIME = 10       # Time to fly from outer target circle to inner (s)
-NUM_ITER = 10               # Number of times to iterate throgh random examples
+NUM_ITER = 50000            # Number of times to iterate throgh random examples
+# NUM_ITER must be divisible by 100 (see main for why)
 
 FlightParams = collections.namedtuple('FlightParams', ['initPoints',
                                                        'finalPoints',
@@ -208,7 +210,7 @@ def singleVehicleGuess(initParams, deg, addNoise=True, seed=None):
     return np.concatenate([xVals, yVals])
 
 
-def runIteration():
+def runIteration(_):
     """
     Runs a single iteration of a random flight test.
 
@@ -253,7 +255,7 @@ def runIteration():
             bezOpt.objectiveFunction,
             x0=xGuess,
             constraints=ineqCons,
-            options={'disp': True,
+            options={  # 'disp': True,
                      'ftol': 1e-9,
 #                     'eps': 1e-21,
                      'maxiter': 250
@@ -318,21 +320,58 @@ def pickTrajectory(resultsList, choice=None):
     return trajectory
 
 
+def appendToDataFrame(resultsList, dataFrame):
+    """
+    """
+    for result in resultsList:
+        status = result[0].status
+        x = result[0].x
+        nfev = result[0].nfev
+        time = result[2]
+
+        data = result[1].copy()
+        data['status'] = status
+        data['x'] = str(x)
+        data['nfev'] = nfev
+        data['time'] = time
+        data['initPoints'] = str(data['initPoints'][0])
+        data['finalPoints'] = str(data['finalPoints'][0])
+
+        temp = pd.DataFrame(data=data, index=[0])
+
+        dataFrame = dataFrame.append(temp, ignore_index=True, sort=False)
+
+    return dataFrame
+
+
 ###############################################################################
 # MAIN
 ###############################################################################
 if __name__ == "__main__":
-    resultsList = []
+    dfCols = ['status', 'x', 'nfev', 'time', 'initPoints', 'finalPoints',
+              'initSpeeds', 'finalSpeeds', 'initAngs', 'finalAngs',
+              'tf']
+    df = pd.DataFrame(columns=dfCols)
 
-    try:
-        for i in range(NUM_ITER):
-            result, model, optTime = runIteration()
-            resultsList.append((result, model, optTime))
-            if not i % 10:
-                print('\n===> Iteration Number {}\n'.format(i))
-    finally:
-        fname = 'singleVehicleTests'+str(uuid.uuid4())+'.pickle'
-        with open(fname, 'wb') as f:
-            pickle.dump(resultsList, f)
+    print('Running...')
+
+    # We batch process 100 iterations at a time to avoid using up too much
+    # memory. This is why NUM_ITER must be divisible by 100
+    for i in range(NUM_ITER//100):
+
+        print('Batch number: {}'.format(i+1))
+
+        p = Pool()
+        startTime = time.time()
+        resultsList = p.map(runIteration, [i for i in range(100)])
+        p.close()
+
+        df = appendToDataFrame(resultsList, df)
+        fileName = 'IterateSingleVehicle_MP.csv'
+        df.to_csv(fileName, mode='a', header=(not os.path.exists(fileName)))
+
+        resultsList = None
+
+    print('Elapsed Time: {}'.format(time.time() - startTime))
 
     showSingleVehicleTest(pickTrajectory(resultsList))
