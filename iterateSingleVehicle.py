@@ -33,7 +33,7 @@ MAX_SPEED = 32              # (m/s)
 MAX_ANG_RATE = 0.2          # (rad/s)
 CONS_TIME = 150             # Conservative time added to the minimum time (s)
 OUTER2INNER_TIME = 10       # Time to fly from outer target circle to inner (s)
-NUM_ITER = 10000            # Number of times to iterate throgh random examples
+NUM_ITER = 10            # Number of times to iterate throgh random examples
 
 FlightParams = collections.namedtuple('FlightParams', ['initPt',
                                                        'finalPt',
@@ -71,7 +71,7 @@ def generateRandomInitialValues(seed=None):
 
     # Determine the initial and final angles
     initialAngle = np.pi*np.random.rand()
-    finalAngle = np.pi-randAng
+    finalAngle = randAng-np.pi
 
     # Pick a conservative estimate for the final time
     avgSpeed = np.average((MIN_SPEED, MAX_SPEED))
@@ -122,6 +122,9 @@ def animateTrajectory(trajectories):
     Animates the trajectories of the vehicles.
     """
     global ani
+
+    if isinstance(trajectories, bez.Bezier):
+        trajectories = [trajectories]
 
     curveLen = len(trajectories[0].curve[0])
     fig, ax = plt.subplots()
@@ -220,24 +223,26 @@ def runIteration():
     # Prepare data for optimization
     ###########################################################################
     initParams = generateRandomInitialValues(SEED)
-    bezOpt = opt.BezOptimization(1, DIM, 1, DEG,
-                                 initParams.initPt,
-                                 initParams.finalPt,
-                                 MIN_ELEM,
-                                 minVel=MIN_SPEED,
-                                 maxVel=MAX_SPEED,
+    bezOpt = opt.BezOptimization(numVeh=1,
+                                 dimension=DIM,
+                                 degree=DEG,
+                                 minimizeGoal=MIN_ELEM,
+                                 minSpeed=MIN_SPEED,
+                                 maxSpeed=MAX_SPEED,
                                  maxAngRate=MAX_ANG_RATE,
                                  modelType='dubins',
-                                 initVels=initParams.initSpeed,
-                                 finalVels=initParams.finalSpeed,
+                                 initPoints=initParams.initPt,
+                                 finalPoints=initParams.finalPt,
+                                 initSpeeds=initParams.initSpeed,
+                                 finalSpeeds=initParams.finalSpeed,
                                  initAngs=initParams.initAng,
                                  finalAngs=initParams.finalAng,
                                  tf=initParams.finalTime)
 
     xGuess = singleVehicleGuess(initParams, DEG, SEED)
 
-    ineqCons = [{'type': 'ineq', 'fun': bezOpt.minVelConstraints},
-                {'type': 'ineq', 'fun': bezOpt.maxVelConstraints},
+    ineqCons = [{'type': 'ineq', 'fun': bezOpt.minSpeedConstraints},
+                {'type': 'ineq', 'fun': bezOpt.maxSpeedConstraints},
                 {'type': 'ineq', 'fun': bezOpt.maxAngularRateConstraints}]
 
     ###########################################################################
@@ -281,8 +286,36 @@ def showSingleVehicleTest(trajectory):
     plt.title('Flight Trajectory')
     plt.xlabel('X Location (m)')
     plt.ylabel('Y Location (m)')
+    plt.xlim([FLIGHT_AREA_MIN, FLIGHT_AREA_MAX])
+    plt.ylim([FLIGHT_AREA_MIN, FLIGHT_AREA_MAX])
 
     plt.show()
+
+    animateTrajectory(trajectory)
+
+
+def pickTrajectory(resultsList, choice=None):
+    """
+    """
+    if choice is None:
+        successful = [i for i in resultsList if i[0].success]
+        idx = np.random.randint(0, len(successful))
+        result = successful[idx]
+    else:
+        result = resultsList[choice]
+
+    x = result[0].x
+    model = result[1]
+
+    if 'initVels' in model:
+        model['initSpeeds'] = model['initVels']
+    if 'finalVels' in model:
+        model['finalSpeeds'] = model['finalVels']
+
+    y = opt.reshapeVector(x, 1, 2, model)
+    trajectory = bez.Bezier(y, tf=model['tf'])
+
+    return trajectory
 
 
 ###############################################################################
@@ -301,3 +334,5 @@ if __name__ == "__main__":
         fname = 'singleVehicleTests'+str(uuid.uuid4())+'.pickle'
         with open(fname, 'wb') as f:
             pickle.dump(resultsList, f)
+
+    showSingleVehicleTest(pickTrajectory(resultsList))

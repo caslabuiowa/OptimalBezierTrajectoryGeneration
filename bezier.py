@@ -168,10 +168,13 @@ class Bezier(BezierParams):
 
     @property
     def curve(self):
+        if self._tau is None:
+            self._tau = np.arange(0, 1.01, 0.01)
+
         if self._curve is None:
-            self._curve = np.zeros([self.dim, len(self.tau)])
+            self._curve = np.zeros([self.dim, len(self._tau)])
             for i, pts in enumerate(self.cpts):
-                self._curve[i] = bezierCurve(pts, self.tau)
+                self._curve[i] = bezierCurve(pts, self._tau)
 
         return self._curve
 

@@ -69,7 +69,7 @@ class BezOptimization:
     endPoints (np.array) - Final positions of the vehicles using the same
     format found in startPoints.
 
-    minElem (str) - Can be one of the following strings:
+    minGoal (str) - Can be one of the following strings:
         'pos' - Minimize distance traveled
         'vel' - Minimize the velocity
         'accel' - Minimize the acceleration
@@ -94,7 +94,7 @@ class BezOptimization:
                  finalAngs=None,
                  tf=None):
 
-        self.numVeh = numVeh
+        self.nVeh = numVeh
         self.dim = dimension
         self.deg = degree
         self.minGoal = minimizeGoal
@@ -124,14 +124,14 @@ class BezOptimization:
                                               self.nVeh,
                                               self.dim,
                                               self.model,
-                                              self.minVel)
+                                              self.minSpeed)
 
         self.maxSpeedConstraints = lambda x: _maxSpeedConstraints(
                                               x,
                                               self.nVeh,
                                               self.dim,
                                               self.model,
-                                              self.maxVel)
+                                              self.maxSpeed)
 
         self.maxAngularRateConstraints = lambda x: _maxAngularRateConstraints(
                                               x,
@@ -145,7 +145,7 @@ class BezOptimization:
                                               self.nVeh,
                                               self.dim,
                                               self.model,
-                                              minElem=self.minElem)
+                                              minGoal=self.minGoal)
 
 #    def generateGuess(self, random=False, seed=None):
 #        """
@@ -310,7 +310,7 @@ def _maxAngularRateConstraints(x, nVeh, dim, model, maxAngRate):
     angularRates = []
     for i in range(nVeh):
         pos = bez.Bezier(y[i*dim:i*dim+dim, :], tf=tf)
-        angRate = bez.angularRateSqr(pos.elev(10))
+        angRate = angularRateSqr(pos.elev(10))
         angularRates.append(angRate)
 
     angularRateCpts = np.concatenate(
@@ -319,7 +319,7 @@ def _maxAngularRateConstraints(x, nVeh, dim, model, maxAngRate):
     return (maxAngRate**2 - angularRateCpts).squeeze()
 
 
-def _objectiveFunction(x, nVeh, dim, model, minElem):
+def _objectiveFunction(x, nVeh, dim, model, minGoal):
     """Objective function to be optimized.
 
 
@@ -332,7 +332,7 @@ def _objectiveFunction(x, nVeh, dim, model, minElem):
     :type dim: int
     :param model: See model description in BezOptimization class description
     :type model: dict
-    :param minElem: Element to be minimized. This string can be one of a few
+    :param minGoal: Element to be minimized. This string can be one of a few
         different values:
             vel - Minimize the sum of velocities of the vehicle trajectories
             accel - Minimize the sum of accelerations of the vehicle
@@ -340,26 +340,26 @@ def _objectiveFunction(x, nVeh, dim, model, minElem):
             jerk - Minimize the sum of jerks of the vehicle trajectories
             euclidean - Minimize the sum of the Euclidean distance between the
                 control points of each trajectory.
-    :type minElem: str
-    :return: Cost of the current iteration according to the minElem
+    :type minGoal: str
+    :return: Cost of the current iteration according to the minGoal
     :rtype: float
     """
     y = reshapeVector(x, nVeh, dim, model)
     tf = model['tf']
     curves = []
-    minElem = minElem.lower()
+    minGoal = minGoal.lower()
 
-    if minElem == 'euclidean':
+    if minGoal == 'euclidean':
         return euclideanObjective(y, nVeh, dim)
 
     else:
         for i in range(nVeh):
             pos = bez.Bezier(y[i*dim:i*dim+dim, :], tf=tf)
             vel = pos.diff()
-            if minElem == 'accel':
+            if minGoal == 'accel':
                 accel = vel.diff()
                 curves.append(accel)
-            if minElem == 'jerk':
+            if minGoal == 'jerk':
                 jerk = vel.diff().diff()
                 curves.append(jerk)
 
@@ -510,7 +510,7 @@ def reshapeVector(x, nVeh, dim, model=None):
     Model Types:
         Dubins: Uses the Dubin's car model for a differential drive vehicle.
         This model type requires the following parameters in the model
-        dictionary: initPoints, finalPoints, initVels, finalVels, initAngs,
+        dictionary: initPoints, finalPoints, initSpeeds, finalSpeeds, initAngs,
         finalAngs, tf.
         The input vector x will not include the first two and last two control
         points for each vehicle. The vector should look like the following
@@ -565,14 +565,14 @@ def reshapeVector(x, nVeh, dim, model=None):
         y = np.empty((numRows, degree+1))
 
         # Dict params used by Dubin's model specifically
-        initVels = np.array(model['initSpeeds'])
-        finalVels = np.array(model['finalSpeeds'])
+        initSpeeds = np.array(model['initSpeeds'])
+        finalSpeeds = np.array(model['finalSpeeds'])
         initAngs = np.array(model['initAngs'])
         finalAngs = np.array(model['finalAngs'])
         tf = model['tf']
 
-        initMag = initVels*tf/degree
-        finalMag = finalVels*tf/degree
+        initMag = initSpeeds*tf/degree
+        finalMag = finalSpeeds*tf/degree
 
 #        print('InitPoints: {}'.format(initPoints))
 #        print('InitAngs: {}'.format(initAngs))
