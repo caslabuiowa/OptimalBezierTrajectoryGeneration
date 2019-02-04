@@ -26,6 +26,12 @@ class BezierParams:
     :param tf: Final time of the Bezier curve trajectory.
     :type tf: float
     """
+    splitCache = defaultdict(dict)
+    elevationMatrixCache = defaultdict(dict)
+    productMatrixCache = defaultdict(dict)
+    diffMatrixCache = defaultdict(dict)
+    bezCoefCache = dict()
+
     def __init__(self, cpts=None, tau=None, tf=1.0):
         self._tau = tau
         self._tf = float(tf)
@@ -107,11 +113,11 @@ class Bezier(BezierParams):
     :type tf: float
 
     """
-    splitCache = dict()
-    elevationMatrixCache = defaultdict(dict)
-    productMatrixCache = dict()
-    diffMatrixCache = defaultdict(dict)
-    bezCoefCache = defaultdict(dict)
+#    splitCache = dict()
+#    elevationMatrixCache = defaultdict(dict)
+#    productMatrixCache = dict()
+#    diffMatrixCache = defaultdict(dict)
+#    bezCoefCache = defaultdict(dict)
 
     def __init__(self, cpts=None, tau=None, tf=1.0):
         super().__init__(cpts=cpts, tau=tau, tf=tf)
@@ -273,10 +279,10 @@ class Bezier(BezierParams):
         c = np.empty((dim, m+n+1))
 
         try:
-            coefMat = Bezier.bezCoefCache[m][n]
+            coefMat = Bezier.productMatrixCache[m][n]
         except KeyError:
             coefMat = bezProductCoefficients(m, n)
-            Bezier.bezCoefCache[m][n] = coefMat
+            Bezier.productMatrixCache[m][n] = coefMat
 
         for d in range(dim):
             c[d] = multiplyBezCurves(a[d], b[d], coefMat)
@@ -375,6 +381,35 @@ class Bezier(BezierParams):
 
         return curveDot.elev()
 
+    def split(self, z):
+        """Splits the curve into two curves at point z
+        """
+        try:
+            Q, Qp = Bezier.splitCache[self.deg][z]
+        except KeyError:
+            try:
+                coefMat = Bezier.bezCoefCache[self.deg]
+            except KeyError:
+                coefMat = buildBezMatrix(self.deg)
+                Bezier.bezCoefCache[self.deg] = coefMat
+
+            Q, Qp = splitCurveMat(self.deg, z, coefMat)
+            Bezier.splitCache[self.deg][z] = (Q, Qp)
+
+        cpts1 = []
+        cpts2 = []
+        for d in range(self.dim):
+            cpts1.append(Q.dot(self.cpts[d, :]))
+            cpts2.append(Qp.dot(self.cpts[d, :]))
+
+        c1 = self.copy()
+        c2 = self.copy()
+
+        c1.cpts = cpts1
+        c2.cpts = cpts2
+
+        return c1, c2
+
     def normSquare(self):
         """Calculates the norm squared of the Bezier curve
 
@@ -385,54 +420,13 @@ class Bezier(BezierParams):
         :rtype: Bezier
         """
         try:
-            prodM = Bezier.productMatrixCache[self.deg]
+            prodM = Bezier.productMatrixCache[self.deg][self.deg]
         except KeyError:
             prodM = prodMatrix(self.deg)
-            Bezier.productMatrixCache[self.deg] = prodM
+            Bezier.productMatrixCache[self.deg][self.deg] = prodM
 
         return Bezier(_normSquare(self.cpts, 1, self.dim, prodM),
                       tau=self.tau, tf=self.tf)
-
-# TODO: Create a split function that doesn't use the symbolic library so that
-#        it runs quicker.
-#
-#    def split(self, splitPoint):
-#        """Splits the Bezier curve at tau = splitPoint.
-#
-#        This method uses the matrix representation of Bezier curves and can be
-#        found at the following source:
-#        https://pomax.github.io/bezierinfo/#matrixsplit
-#        """
-#        if splitPoint < 0 or splitPoint > 1:
-#            errorMsg = (
-#                    'Can only split the curve at a tau '
-#                    'value between 0 and 1.'
-#                    )
-#            raise ValueError(errorMsg)
-#        from sympy.abc import t
-#
-#        try:
-#            Q, Qp = Bezier.Q[self.deg]
-#
-#        except KeyError:
-#            M = buildBezMatrix(self.deg)
-#            Z = np.diag(createPowerBasisVector(self.deg))
-#            Q = M.I * Z * M
-#
-#            shiftedQ = np.vstack(
-#                    (np.roll(m.A1, self.deg-i) for i, m in enumerate(Q)))
-#            Qp = np.flip(shiftedQ, 0)
-#
-#            Q = lambdify(t, Matrix(Q))
-#            Qp = lambdify(t, Matrix(Qp))
-#
-#            Bezier.Q[self.deg] = Q, Qp
-#
-#        c1 = Q(splitPoint)*self.cpts.T
-#        c2 = Qp(splitPoint)*self.cpts.T
-#
-#        return (Bezier(c1.T, tau=self.tau, tf=self.tf),
-#                Bezier(c2.T, tau=self.tau, tf=self.tf))
 
 
 class RationalBezier(BezierParams):
@@ -469,7 +463,7 @@ def bezierCurve(cpts, tau):
     :rtype: numpy.ndarray
     """
     cpts = np.array(cpts)
-    tau = np.array(tau, dtype=np.float64)
+    tau = np.array(tau, dtype=np.float64, ndmin=1)
     tauLen = tau.size
     n = cpts.size-1
     curve = np.empty(tauLen)
@@ -589,6 +583,38 @@ def prodMatrix(N):
     return T
 
 
+# TODO:
+#    Change this function name to prodM.
+#    Clean up and slightly change _normSquare to accommodate this change
+@numba.jit
+def bezProductCoefficients(m, n=None):
+    """Produces a product matrix for obtaining the product of two Bezier curves
+
+    This function computes the matrix of coefficients for multiplying two
+    Bezier curves. This function exists so that the coefficients matrix can be
+    computed ahead of time when performing many multiplications.
+
+    :param m: Degree of the first Bezier curve
+    :type m: int
+    :param n: Degree of the second Bezier curve
+    :type n: int
+    :return: Product matrix
+    :rtype: numpy.ndarray
+    """
+
+    if n is None:
+        n = m
+
+    coefMat = np.zeros(((m+1)*(n+1), m+n+1))
+
+    for k in range(m+n+1):
+        den = binom(m+n, k)
+        for j in range(max(0, k-n), min(m, k)+1):
+            coefMat[m*j+k, k] = binom(m, j)*binom(n, k-j)/den
+
+    return coefMat
+
+
 @numba.jit
 def multiplyBezCurves(multiplier, multiplicand, coefMat=None):
     """Multiplies two Bezier curves together
@@ -628,29 +654,39 @@ def multiplyBezCurves(multiplier, multiplicand, coefMat=None):
 
 
 @numba.jit
-def bezProductCoefficients(m, n):
-    """Produces a product matrix for obtaining the product of two Bezier curves
+def splitCurveMat(deg, z, coefMat=None):
+    """Creates matrices Q and Qp that are used to compute control points for a
+        split curve.
 
-    This function computes the matrix of coefficients for multiplying two
-    Bezier curves. This function exists so that the coefficients matrix can be
-    computed ahead of time when performing many multiplications.
-
-    :param m: Degree of the first Bezier curve
-    :type m: int
-    :param n: Degree of the second Bezier curve
-    :type n: int
-    :return: Product matrix
-    :rtype: numpy.ndarray
+    :param deg: Degree of the Bezier curve
+    :type deg: int
+    :param z: Point on the curve at which to split the curve [0,1]
+    :type z: float
+    :param coefMat: Matrix of Binomial coefficients for a Bezier curve. Passing
+        in a precomputed matrix will significantly increase the speed of the
+        function.
+    :type coefMat: numpy.ndarray or None
+    :return: Returns a tuple of matrices. The zeroth element is the Q matrix
+        for computing control points before the point z and the first element
+        is the Q matrix for computing after the point z.
+    :rtype: tuple(numpy.ndarray, numpy.ndarray)
     """
+    powMat = np.diag(np.power(z, range(deg+1)))
 
-    coefMat = np.zeros(((m+1)*(n+1), m+n+1))
+    if coefMat is None:
+        coefMat = buildBezMatrix(deg)
 
-    for k in range(m+n+1):
-        den = binom(m+n, k)
-        for j in range(max(0, k-n), min(m, k)+1):
-            coefMat[m*j+k, k] = binom(m, j)*binom(n, k-j)/den
+    # Q = M^-1 * Z * M
+    Q = np.linalg.inv(coefMat).dot(powMat).dot(coefMat)
 
-    return coefMat
+    # Qp is just Q but rolled and flipped
+    Qp = np.empty((deg+1, deg+1))
+    for i, row in enumerate(Q):
+        Qp[deg-i, :] = np.roll(row, deg-i)
+
+    return Q, Qp
+
+
 # TODO
 #   * Find a fast implementation for the calculation of binomial coefficients
 #     that doesn't break for large numbers. Try fastBinom for 70 choose 20 and

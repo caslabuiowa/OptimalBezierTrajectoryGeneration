@@ -33,7 +33,7 @@ MAX_SPEED = 32              # (m/s)
 MAX_ANG_RATE = 0.2          # (rad/s)
 CONS_TIME = 150             # Conservative time added to the minimum time (s)
 OUTER2INNER_TIME = 10       # Time to fly from outer target circle to inner (s)
-NUM_ITER = 10               # Number of times to iterate throgh random examples
+NUM_ITER = 40000            # Number of times to iterate throgh random examples
 
 FlightParams = collections.namedtuple('FlightParams', ['initPoints',
                                                        'finalPoints',
@@ -159,7 +159,7 @@ def animateTrajectory(trajectories):
     plt.show()
 
 
-def singleVehicleGuess(initParams, deg, addNoise=True, seed=None):
+def singleVehicleGuess(initParams, deg, addNoise=True, noiseMag=10, seed=None):
     """
     Generates a guess for a single vehicle. This also assumes that the initial
     and final points, initial and final angles, and initial and final speeds
@@ -173,6 +173,8 @@ def singleVehicleGuess(initParams, deg, addNoise=True, seed=None):
         deg - Degree of the Bezier curve
 
         addNoise - If True, add random noise to the initial guess.
+
+        noiseMag - Magnitude of the noise. Effectively the min/max of the noise
 
         seed - Seed for the random noise. Set to None for nondeterministic
         random values.
@@ -202,8 +204,8 @@ def singleVehicleGuess(initParams, deg, addNoise=True, seed=None):
 
     if addNoise:
         np.random.seed(seed)
-        xVals += np.random.random(deg-3)
-        yVals += np.random.random(deg-3)
+        xVals += (np.random.random(deg-3)-0.5)*2*noiseMag
+        yVals += (np.random.random(deg-3)-0.5)*2*noiseMag
 
     return np.concatenate([xVals, yVals])
 
@@ -239,8 +241,6 @@ def runIteration():
                                  finalAngs=initParams.finalAngs,
                                  tf=initParams.tf)
 
-    xGuess = singleVehicleGuess(initParams, DEG, SEED)
-
     ineqCons = [{'type': 'ineq', 'fun': bezOpt.minSpeedConstraints},
                 {'type': 'ineq', 'fun': bezOpt.maxSpeedConstraints},
                 {'type': 'ineq', 'fun': bezOpt.maxAngularRateConstraints}]
@@ -248,20 +248,29 @@ def runIteration():
     ###########################################################################
     # Optimize and time
     ###########################################################################
-    startTime = time.time()
-    results = sop.minimize(
-            bezOpt.objectiveFunction,
-            x0=xGuess,
-            constraints=ineqCons,
-            options={'disp': True,
-                     'ftol': 1e-9,
-#                     'eps': 1e-21,
-                     'maxiter': 250
-                     },
-#            callback=minCB,
-            method='SLSQP')
-    endTime = time.time()
-    minCB.count = 0
+    for i in range(10):
+        xGuess = singleVehicleGuess(initParams, DEG,
+                                    addNoise=True,
+                                    noiseMag=10*i,
+                                    seed=SEED)
+        startTime = time.time()
+        results = sop.minimize(
+                bezOpt.objectiveFunction,
+                x0=xGuess,
+                constraints=ineqCons,
+                options={'disp': True,
+                         'ftol': 1e-9,
+#                         'eps': 1e-21,
+                         'maxiter': 1000
+                         },
+#                callback=minCB,
+                method='SLSQP')
+        endTime = time.time()
+#        minCB.count = 0
+        # Try a few more random initial guesses before we give up due to a
+        # positive directional derivative for the linesearch
+        if results.status != 8:
+            break
 
     return results, bezOpt.model, endTime-startTime
 
@@ -331,8 +340,8 @@ if __name__ == "__main__":
             if not i % 10:
                 print('\n===> Iteration Number {}\n'.format(i))
     finally:
-        fname = 'singleVehicleTests'+str(uuid.uuid4())+'.pickle'
+        fname = 'singleVehicleTests_'+str(uuid.uuid4())+'.pickle'
         with open(fname, 'wb') as f:
             pickle.dump(resultsList, f)
 
-    showSingleVehicleTest(pickTrajectory(resultsList))
+#    showSingleVehicleTest(pickTrajectory(resultsList))
