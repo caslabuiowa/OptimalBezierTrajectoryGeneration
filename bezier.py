@@ -11,6 +11,7 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 import numba
 import numpy as np
+import scipy.optimize
 from scipy.special import binom
 
 
@@ -113,11 +114,6 @@ class Bezier(BezierParams):
     :type tf: float
 
     """
-#    splitCache = dict()
-#    elevationMatrixCache = defaultdict(dict)
-#    productMatrixCache = dict()
-#    diffMatrixCache = defaultdict(dict)
-#    bezCoefCache = defaultdict(dict)
 
     def __init__(self, cpts=None, tau=None, tf=1.0):
         super().__init__(cpts=cpts, tau=tau, tf=tf)
@@ -213,7 +209,8 @@ class Bezier(BezierParams):
 
         if self.dim == 1:
             ax.plot(self.tau, self.curve[0])
-            ax.plot(np.linspace(0, self.tf, self.deg+1), self.cpts.squeeze())
+            ax.plot(np.linspace(0, self.tf, self.deg+1),
+                    self.cpts.squeeze(), '.--')
         elif self.dim == 2:
             ax.plot(self.curve[0], self.curve[1])
             ax.plot(cpts[0], cpts[1], '.--')
@@ -383,6 +380,12 @@ class Bezier(BezierParams):
 
     def split(self, z):
         """Splits the curve into two curves at point z
+        source: https://pomax.github.io/bezierinfo/#matrixsplit
+
+        :param z: Point at which to split the curve
+        :type z: float
+        :return: Tuple of curves. One before the split point and one after.
+        :rtype: tuple(Bezier, Bezier)
         """
         try:
             Q, Qp = Bezier.splitCache[self.deg][z]
@@ -409,6 +412,170 @@ class Bezier(BezierParams):
         c2.cpts = cpts2
 
         return c1, c2
+
+    def min(self, dim=0, tol=1e-6, maxIter=1000):
+        """Returns the minimum value of the Bezier curve in a single dimension
+
+        Finds the minimum value of the Bezier curve. This is done by first
+        checking the first and last control points since the first and last
+        point lie on the curve. If the first or last control point is not the
+        minimum value, the curve is split at the lowest control point. The new
+        minimum value is then defined as the lowest control point of the two
+        new curves. This continues until the difference between the new minimum
+        and old minimum values is within the desired tolerance.
+
+        :param dim: Which dimension to return the minimum of.
+        :type dim: int
+        :param tol: Tolerance of the minimum value.
+        :type tol: float
+        :param maxIter: Maximum number of iterations to search for the minimum.
+        :type maxIter: int
+        :return: Minimum value of the Bezier curve. None if maximum iterations
+            is met.
+        :rtype: float or None
+        """
+        minVal = min(self.cpts[dim, :])
+
+        if self.cpts[dim, 0] == minVal:
+            return self.cpts[dim, 0]
+
+        elif self.cpts[dim, -1] == minVal:
+            return self.cpts[dim, -1]
+
+        else:
+            lastMin = np.inf
+            newCurve = self.copy()
+            for _ in range(maxIter):
+                splitPoint = (np.argmin(newCurve.cpts[dim, :])
+                              / (newCurve.deg+1.0))
+                c1, c2 = newCurve.split(splitPoint)
+
+                min1 = min(c1.cpts[dim, :])
+                min2 = min(c2.cpts[dim, :])
+
+                if min1 < min2:
+                    newCurve = c1
+                    newMin = min1
+
+                else:
+                    newCurve = c2
+                    newMin = min2
+
+                if np.abs(newMin-lastMin) < tol:
+                    return newMin
+                else:
+                    lastMin = newMin
+
+            print('Maximum number of iterations met')
+            return None
+
+    def max(self, dim=0, tol=1e-6, maxIter=1000):
+        """Returns the maximum value of the Bezier curve in a single dimension
+
+        Finds the maximum value of the Bezier curve. This is done by first
+        checking the first and last control points since the first and last
+        point lie on the curve. If the first or last control point is not the
+        maximum value, the curve is split at the highest control point. The new
+        maximum value is then defined as the highest control point of the two
+        new curves. This continues until the difference between the new maximum
+        and old maximum values is within the desired tolerance.
+
+        :param dim: Which dimension to return the maximum of.
+        :type dim: int
+        :param tol: Tolerance of the maximum value.
+        :type tol: float
+        :param maxIter: Maximum number of iterations to search for the minimum.
+        :type maxIter: int
+        :return: Maximum value of the Bezier curve. None if maximum iterations
+            is met.
+        :rtype: float or None
+        """
+        maxVal = max(self.cpts[dim, :])
+
+        if self.cpts[dim, 0] == maxVal:
+            return self.cpts[dim, 0]
+
+        elif self.cpts[dim, -1] == maxVal:
+            return self.cpts[dim, -1]
+
+        else:
+            lastMax = np.inf
+            newCurve = self.copy()
+            for _ in range(maxIter):
+                splitPoint = (np.argmax(newCurve.cpts[dim, :])
+                              / (newCurve.deg+1.0))
+                c1, c2 = newCurve.split(splitPoint)
+
+                max1 = max(c1.cpts[dim, :])
+                max2 = max(c2.cpts[dim, :])
+
+                if max1 > max2:
+                    newCurve = c1
+                    newMax = max1
+
+                else:
+                    newCurve = c2
+                    newMax = max2
+
+                if np.abs(newMax-lastMax) < tol:
+                    return newMax
+                else:
+                    lastMax = newMax
+
+            print('Maximum number of iterations met')
+            return None
+
+    def min2(self, dim=0, tol=1e-6, maxIter=1000):
+        """Uses scipy's fminbound to find the minimum value of the Bezier curve
+
+        This method is slower than min because it does not exploit the useful
+        properties of a Bezier curve.
+
+        :param dim: Which dimension to return the minimum of.
+        :type dim: int
+        :param tol: Tolerance of the minimum value.
+        :type tol: float
+        :param maxIter: Maximum number of iterations to search for the minimum.
+        :type maxIter: int
+        :return: Minimum value of the Bezier curve. None if maximum iterations
+            is met.
+        :rtype: float or None
+        """
+        def fun(x): return bezierCurve(self.cpts[dim, :], x)
+        _, minVal, status, _ = scipy.optimize.fminbound(fun,
+                                                        x1=0,
+                                                        x2=1,
+                                                        xtol=tol,
+                                                        maxfun=maxIter,
+                                                        full_output=True,
+                                                        disp=1)
+        return minVal[0] if status == 0 else None
+
+    def max2(self, dim=0, tol=1e-6, maxIter=1000):
+        """Uses scipy's fminbound to find the maximum value of the Bezier curve
+
+        This method is slower than max because it does not exploit the useful
+        properties of a Bezier curve.
+
+        :param dim: Which dimension to return the minimum of.
+        :type dim: int
+        :param tol: Tolerance of the minimum value.
+        :type tol: float
+        :param maxIter: Maximum number of iterations to search for the minimum.
+        :type maxIter: int
+        :return: Maximum value of the Bezier curve. None if maximum iterations
+            is met.
+        :rtype: float or None
+        """
+        def fun(x): return -bezierCurve(self.cpts[dim, :], x)
+        _, maxVal, status, _ = scipy.optimize.fminbound(fun,
+                                                        x1=0,
+                                                        x2=1,
+                                                        xtol=tol,
+                                                        maxfun=maxIter,
+                                                        full_output=True,
+                                                        disp=1)
+        return -maxVal[0] if status == 0 else None
 
     def normSquare(self):
         """Calculates the norm squared of the Bezier curve
