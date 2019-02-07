@@ -33,7 +33,7 @@ MAX_SPEED = 32              # (m/s)
 MAX_ANG_RATE = 0.2          # (rad/s)
 CONS_TIME = 150             # Conservative time added to the minimum time (s)
 OUTER2INNER_TIME = 10       # Time to fly from outer target circle to inner (s)
-NUM_ITER = 40000            # Number of times to iterate throgh random examples
+NUM_ITER = 10000            # Number of times to iterate throgh random examples
 
 FlightParams = collections.namedtuple('FlightParams', ['initPoints',
                                                        'finalPoints',
