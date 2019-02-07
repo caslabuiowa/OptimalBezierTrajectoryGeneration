@@ -7,407 +7,611 @@ Created on Thu Oct 18 11:17:47 2018
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
+import numba
 
 import bezier as bez
 
-# TODO
 
 class BezOptimization:
-    """
-    Bezier curve optimization class. Use this along with the Bezier class to
-    optimize trajectories.
-    
-    BezOptimization(nVeh, dim, maxSep, deg, startPoints, endPoints, minElem)
-    
-    INPUTS:
-        nVeh (int) - Number of vehicles.
-        
-        dim (int) - Dimension of trajectories (1D, 2D, or 3D).
-        
-        maxSep (float) - Maximum separation of the vehicles (no two should ever 
-        come closer than maxSep).
-        
-        deg (int) - Degree of the Bezier curves.
-        
-        startPoints (np.array) - Initial positions of the vehicles in the
-        following format (for lower dimensions, omit the y and/or z values):
-            [ [v0x, v0y, v0z],
-              [v1x, v1y, v1z],
-              ...
-              [vNx, vNy, vNz] ]
-            
-        endPoints (np.array) - Final positions of the vehicles using the same
-        format found in startPoints.
-        
-        minElem (str) - Can be one of the following strings:
-            'pos' - Minimize distance traveled
-            'vel' - Minimize the velocity
-            'accel' - Minimize the acceleration
-            'jerk' - Minimize the jerk
-    """
-    def __init__(self, nVeh, dim, maxSep, deg, startPoints, endPoints,
-                 minElem, minVel = 0, maxVel = 1e12):
-        self.nVeh = nVeh
-        self.dim = dim
-        self.maxSep = maxSep
-        self.deg = deg
-        self.startPoints = startPoints
-        self.endPoints = endPoints
-        self.minElem = minElem
-        self.minVel = minVel
-        self.maxVel = maxVel
-#        self.xGuess = self.generateGuess()
-        
-        self.separationConstraints = lambda x: _separationConstraints(x,
-                                              self.nVeh,
-                                              self.dim,
-                                              self.startPoints,
-                                              self.endPoints,
-                                              self.maxSep)
-        
-        self.minVelConstraints = lambda x: _minVelConstraints(x, 
-                                              self.nVeh,
-                                              self.dim,
-                                              self.startPoints,
-                                              self.endPoints,
-                                              self.minVel)
-        
-        self.maxVelConstraints = lambda x: _maxVelConstraints(x,
-                                              self.nVeh,
-                                              self.dim,
-                                              self.startPoints,
-                                              self.endPoints,
-                                              self.maxVel)
-        
-        self.angularRateConstraints = lambda x: _maxAngularRateConstraints(x,
-                                              self.nVeh,
-                                              self.dim,
-                                              self.startPoints,
-                                              self.endPoints,
-                                              self.maxVel)
-        
-        self.objectiveFunction = lambda x: _objectiveFunction(x,
-                                              self.nVeh,
-                                              self.dim,
-                                              self.startPoints,
-                                              self.endPoints,
-                                              minElem=self.minElem)
-        
-    def generateGuess(self, random=False, seed=None):
-        """
-        Generates an initial guess for the optimizer. Set random to true to
-        add random noise to the initial guess. You can provide a seed for
-        deterministic results.
-        """
-        if self.dim != 2:
-            msg = 'Optimization is currently built only for 2 dimensions.'
-            raise NotImplementedError(msg)
-            
-        xGuess = []
-        
-        for i in range(self.nVeh):
-            for j in range(self.dim):
-                line = np.linspace(
-                        self.startPoints[i,j],
-                        self.endPoints[i,j], self.deg+1)
-                
-                if random:
-                    np.random.seed(seed)
-                    line = line + np.random.random(len(line))
-                    
-                xGuess.append(line[1:-1])
-        
-        return np.concatenate(xGuess)
-        
-    def plot(self, x):
-        _separationConstraints(x,
-                              self.nVeh,
-                              self.dim,
-                              self.startPoints,
-                              self.endPoints,
-                              self.maxSep,
-                              True)
-        
-        _objectiveFunction(x,
-                          self.nVeh,
-                          self.dim,
-                          self.startPoints,
-                          self.endPoints,
-                          True,
-                          self.minElem)
+    """Bezier curve optimization class.
 
-def _separationConstraints(x, nVeh, dim, startPoints, endPoints, maxSep, 
-                           plot=False):
+    Use this along with the Bezier class to optimize trajectories.
+
+    The model dict is an important parameter used to help the reshapeVector
+    produce the desired output. The dict parameters that are supported are:
+        type - String representing the type of model. Currently, the
+                supported models are: 'dubins', 'uav', and 'general'
+        initPoints - Initial points of the vehicles
+        finalPoints - Final points of the vehicles
+        initSpeeds - Initial speeds of the vehicles
+        finalSpeeds - Final speeds of the vehicles
+        initAngs - Initial angles (in radians) of the vehicles that follow
+            the ROS standards REP103 where 0 rad is East
+        finalAngs - Final angles of the vehicles (in radians)
+        tf - Final time when the vehicles reach their final points.
+
+    :param nVeh: Number of vehicles
+    :type nVeh: int
+    :param dimension: Dimension of the vehicles. Currently only works for 2D
+    :type dimension: int
+    :param degree: Degree of the Bezier curves being used
+    :type degree: int
+    :param minimizeGoal: Element to be minimized. This string can be one of a
+        few different values:
+            vel - Minimize the sum of velocities of the vehicle trajectories
+            accel - Minimize the sum of accelerations of the vehicle
+                trajectories
+            jerk - Minimize the sum of jerks of the vehicle trajectories
+            euclidean - Minimize the sum of the Euclidean distance between the
+                control points of each trajectory.
+    :type minimizeGoal: str
+    :param maxSep: Maximum separation between vehicles at each point in time.
+    :type maxSep: float
+    :param minSpeed: Minimum speed of the vehicles
+    :type minSpeed: float
+    :param maxSpeed: Maximum speed of the vehicles
+    :type maxSpeed: float
+    :param maxAngRate: Maximum angular rate of the vehicles
+    :type maxAngRate: float
+    :param modelType: Model type being optimized. The models currently
+        supported are: 'dubins', 'uav', and 'general
+    :type modelType: str
+    :param maxSep: Maximum separation between vehicles.
+    :type maxSep: float
+
+    startPoints (np.array) - Initial positions of the vehicles in the
+    following format (for lower dimensions, omit the y and/or z values):
+        [ [v0x, v0y, v0z],
+          [v1x, v1y, v1z],
+          ...
+          [vNx, vNy, vNz] ]
+
+    endPoints (np.array) - Final positions of the vehicles using the same
+    format found in startPoints.
+
+    minGoal (str) - Can be one of the following strings:
+        'pos' - Minimize distance traveled
+        'vel' - Minimize the velocity
+        'accel' - Minimize the acceleration
+        'jerk' - Minimize the jerk
     """
-    Calculate the separation between vehicles.
-    
-    NOTE: This only works for 2 dimensions at the moment.
+
+    def __init__(self,
+                 numVeh=1,
+                 dimension=1,
+                 degree=5,
+                 minimizeGoal='Euclidean',
+                 maxSep=0.9,
+                 minSpeed=0,
+                 maxSpeed=1e6,
+                 maxAngRate=1e6,
+                 modelType=None,
+                 initPoints=None,
+                 finalPoints=None,
+                 initSpeeds=None,
+                 finalSpeeds=None,
+                 initAngs=None,
+                 finalAngs=None,
+                 tf=None):
+
+        self.nVeh = numVeh
+        self.dim = dimension
+        self.deg = degree
+        self.minGoal = minimizeGoal
+        self.maxSep = maxSep
+        self.minSpeed = minSpeed
+        self.maxSpeed = maxSpeed
+        self.maxAngRate = maxAngRate
+
+        self.model = {'type': modelType,
+                      'initPoints': initPoints,
+                      'finalPoints': finalPoints,
+                      'initSpeeds': initSpeeds,
+                      'finalSpeeds': finalSpeeds,
+                      'initAngs': initAngs,
+                      'finalAngs': finalAngs,
+                      'tf': tf}
+
+        self.separationConstraints = lambda x: _separationConstraints(
+                                              x,
+                                              self.nVeh,
+                                              self.dim,
+                                              self.model,
+                                              self.maxSep)
+
+        self.minSpeedConstraints = lambda x: _minSpeedConstraints(
+                                              x,
+                                              self.nVeh,
+                                              self.dim,
+                                              self.model,
+                                              self.minSpeed)
+
+        self.maxSpeedConstraints = lambda x: _maxSpeedConstraints(
+                                              x,
+                                              self.nVeh,
+                                              self.dim,
+                                              self.model,
+                                              self.maxSpeed)
+
+        self.maxAngularRateConstraints = lambda x: _maxAngularRateConstraints(
+                                              x,
+                                              self.nVeh,
+                                              self.dim,
+                                              self.model,
+                                              self.maxAngRate)
+
+        self.objectiveFunction = lambda x: _objectiveFunction(
+                                              x,
+                                              self.nVeh,
+                                              self.dim,
+                                              self.model,
+                                              minGoal=self.minGoal)
+
+#    def generateGuess(self, random=False, seed=None):
+#        """
+#        Generates an initial guess for the optimizer. Set random to true to
+#        add random noise to the initial guess. You can provide a seed for
+#        deterministic results.
+#        """
+#        if self.dim != 2:
+#            msg = 'Optimization is currently built only for 2 dimensions.'
+#            raise NotImplementedError(msg)
+#
+#        xGuess = []
+#
+#        for i in range(self.nVeh):
+#            for j in range(self.dim):
+#                line = np.linspace(
+#                        self.startPoints[i, j],
+#                        self.endPoints[i, j], self.deg+1)
+#
+#                if random:
+#                    np.random.seed(seed)
+#                    line = line + np.random.random(len(line))
+#
+#                xGuess.append(line[1:-1])
+#
+#        return np.concatenate(xGuess)
+
+
+def _separationConstraints(x, nVeh, dim, model, maxSep):
+    """Calculate the separation between vehicles.
+
+    The maximum separation is found by degree elevation.
+
+    NOTE: This only works for 2 dimensions.
+
+    :param x: Optimization vector
+    :type x: numpy.ndarray
+    :param nVeh: Number of vehicles
+    :type nVeh: int
+    :param dim: Dimension of the vehicles. Currently only works for 2D
+    :type dim: int
+    :param model: See model description in BezOptimization class description
+    :type model: dict
+    :param maxSep: Maximum separation between vehicles.
+    :type maxSep: float
     """
     if nVeh > 1:
-        y = reshapeVector(x, nVeh, dim, startPoints, endPoints, 0, 0)
-        
+        y = reshapeVector(x, nVeh, dim, model)
+        tf = model['tf']
+
         distVeh = []
         vehList = []
         for i in range(nVeh):
-            vehList.append(bez.Bezier(y[i*dim:i*dim+dim, :]))
-        
+            vehList.append(bez.Bezier(y[i*dim:i*dim+dim, :], tf=tf))
+
         for i in range(nVeh):
             for j in range(i, nVeh):
-                if j>i:
-                    dv = bez.Bezier(vehList[i].ctrlPts -
-                        vehList[j].ctrlPts)
+                if j > i:
+#                    dv = bez.Bezier(vehList[i].cpts - vehList[j].cpts, tf=tf)
+                    dv = vehList[i] - vehList[j]
                     distVeh.append(dv.normSquare().elev(10))
-                    
-        if plot:
-            plt.figure(101)
-            plt.title('Squared Distances', fontsize=28)
-            for dist in distVeh:
-                plt.plot(dist._tau, dist.curve.squeeze())
-                plt.plot(np.linspace(0,1,dist.deg+1),
-                         np.asarray(dist.ctrlPts).squeeze(), '.')
-                plt.plot([0, 1], [maxSep**2, maxSep**2], 'r--')
-            plt.xlabel('Tau', fontsize=16)
-            plt.ylabel('$Distance^2$', fontsize=20)
-            
-        distances = np.concatenate([np.asarray(i.ctrlPts).squeeze()
-            for i in distVeh])
+
+        distances = np.concatenate([i.cpts.squeeze() for i in distVeh])
+
         return (distances - maxSep**2).squeeze()
     else:
         return None
-    
-def _minVelConstraints(x, nVeh, dim, startPoints, endPoints, minVel,
-                       plot=False):
-    """
-    Creates the minimum velocity constraints.
-    
+
+
+def _minSpeedConstraints(x, nVeh, dim, model, minSpeed):
+    """Creates the minimum velocity constraints.
+
     Useful in systems such as aircraft who may not fall below a certain speed.
-    """
-    y = reshapeVector(x, nVeh, dim, startPoints, endPoints, 0, 0)
-    
-    positions = []
-    vels = []
-    
-    for i in range(nVeh):
-        pos = bez.Bezier(y[i*dim:i*dim+dim, :])
-        vel = pos.diff()
-        
-        positions.append(pos)
-        vels.append(vel)
-        
-    velSqr = [curve.normSquare().elev(10) for curve in vels]
-    
-    velocities = np.concatenate([i.ctrlPts.squeeze() for i in velSqr])
-    return (velocities - minVel**2).squeeze()
 
-def _maxVelConstraints(x, nVeh, dim, startPoints, endPoints, maxVel,
-                       plot=False):
+    :param x: Optimization vector
+    :type x: numpy.ndarray
+    :param nVeh: Number of vehicles
+    :type nVeh: int
+    :param dim: Dimension of the vehicles. Currently only works for 2D.
+    :type dim: int
+    :param model: See model description in BezOptimization class description.
+    :type model: dict
+    :param minSpeed: Minimum speed of the vehicle.
+    :type minSpeed: float
+    :return: Inequality constraint for the minimum speed.
+    :rtype: float
     """
-    Creates the maximum velocity constraints.
-    
+    y = reshapeVector(x, nVeh, dim, model)
+    tf = model['tf']
+
+    speeds = []
+
+    for i in range(nVeh):
+        pos = bez.Bezier(y[i*dim:i*dim+dim, :], tf=tf)
+        speed = pos.diff()
+        speeds.append(speed)
+
+    speedSqr = [curve.normSquare().elev(50) for curve in speeds]
+
+    speeds = np.concatenate([i.cpts.squeeze() for i in speedSqr])
+
+    return (speeds - minSpeed**2).squeeze()
+
+
+def _maxSpeedConstraints(x, nVeh, dim, model, maxSpeed):
+    """Creates the maximum velocity constraints.
+
     Useful for limiting the maximum speed of a vehicle.
-    """
-    y = reshapeVector(x, nVeh, dim, startPoints, endPoints, 0, 0)
-    
-    positions = []
-    vels = []
-    
-    for i in range(nVeh):
-        pos = bez.Bezier(y[i*dim:i*dim+dim, :])
-        vel = pos.diff()
-        
-        positions.append(pos)
-        vels.append(vel)
-        
-    velSqr = [curve.normSquare().elev(10) for curve in vels]
-    
-    velocities = np.concatenate([i.ctrlPts.squeeze() for i in velSqr])
-    return (maxVel**2 - velocities).squeeze()
 
-def _maxAngularRateConstraints(x, nVeh, dim, startPoints, endPoints, maxVel,
-                       plot=False):
+    :param x: Optimization vector
+    :type x: numpy.ndarray
+    :param nVeh: Number of vehicles
+    :type nVeh: int
+    :param dim: Dimension of the vehicles. Currently only works for 2D
+    :type dim: int
+    :param model: See model description in BezOptimization class description
+    :type model: dict
+    :param maxSpeed: Maximum speed of the vehicle.
+    :type maxSpeed: float
+    :return: Inequality constraint for the maximum speed
+    :rtype: float
     """
-    Creates the maximum angular rate constraint.
-    
-    This is useful for a dubins car model that has a constraint on the maximum
-    angular rate.
-    """
-    pass
-    
-def _objectiveFunction(x, nVeh, dim, startPoints, endPoints,
-                      plot=False, minElem='accel'):
-    y = reshapeVector(x, nVeh, dim, startPoints, endPoints, 0, 0)
-    positions = []
-    vels = []
-    accels = []
-    jerks = []
-    
+    y = reshapeVector(x, nVeh, dim, model)
+    tf = model['tf']
+
+    speeds = []
+
     for i in range(nVeh):
-        pos = bez.Bezier(y[i*dim:i*dim+dim, :])
-        vel = pos.diff()
-        accel = vel.diff()
-        jerk = accel.diff()
-        
-        positions.append(pos)
-        vels.append(vel)
-        accels.append(accel)
-        jerks.append(jerk)
-        
-    curves = {'pos':positions, 'vel':vels, 'accel':accels, 'jerk':jerks}
-    summation = 0
-    for curve in curves[minElem]:
-        temp = curve.normSquare()
-        summation = summation + temp.ctrlPts.sum()
-    
-    if plot:
-#        plt.figure(100)
-#        plt.title('Velocity, Acceleration, and Jerk of Vehicles', fontsize=24)
-        for i in range(len(vels)):
-            plt.figure(100)
-            vel2 = vels[i].normSquare()
-            plt.plot(np.arange(0,1.01,0.01), vel2.curve.squeeze(), '-')
-            
-            plt.figure(200)
-            accel2 = accels[i].normSquare()
-            plt.plot(np.arange(0,1.01,0.01), accel2.curve.squeeze(), '--')
-            
-            plt.figure(300)
-            jerk2 = jerks[i].normSquare()
-            plt.plot(np.arange(0,1.01,0.01), jerk2.curve.squeeze(), '-.')
-            
-#        plt.xlim((0,1))
-##        plt.ylim(-0.1, 0.5)
-#        plt.xlabel('Tau', fontsize=16)
-#        plt.ylabel('Velocity, Acceleration, Jerk', fontsize=16)
-#        leg = []
-#        for i in range(len(vels)):
-#            leg.append('vel{}'.format(i))
-#            leg.append('accel{}'.format(i))
-#            leg.append('jerk{}'.format(i))
-#        plt.legend(leg)
-        plt.figure(100)
-        plt.legend(['vel{}'.format(i) for i in range(len(vels))])
-        plt.xlabel('Tau', fontsize=20)
-        plt.ylabel('Velocity (No Units)', fontsize=20)
-        plt.title('Vehicle Velocities', fontsize=28)
-        
-        plt.figure(200)
-        plt.legend(['accel{}'.format(i) for i in range(len(accels))])
-        plt.xlabel('Tau', fontsize=20)
-        plt.ylabel('Acceleration (No Units)', fontsize=20)
-        plt.title('Vehicle Accelerations', fontsize=28)
-        
-        plt.figure(300)
-        plt.legend(['jerk{}'.format(i) for i in range(len(jerks))])
-        plt.xlabel('Tau', fontsize=20)
-        plt.ylabel('Jerk (No Units)', fontsize=20)
-        plt.title('Vehicle Jerks', fontsize=28)
-        
+        pos = bez.Bezier(y[i*dim:i*dim+dim, :], tf=tf)
+        speed = pos.diff()
+        speeds.append(speed)
+
+    speedSqr = [curve.normSquare().elev(50) for curve in speeds]
+
+    speeds = np.concatenate([i.cpts.squeeze() for i in speedSqr])
+
+    return (maxSpeed**2 - speeds).squeeze()
+
+
+def _maxAngularRateConstraints(x, nVeh, dim, model, maxAngRate):
+    """Creates the maximum angular rate constraint.
+
+    This is useful for a dubins car model that has a constraint on the maximum
+    angular rate. The dimension is assumed to be 2.
+
+    :param x: Optimization vector
+    :type x: numpy.ndarray
+    :param nVeh: Number of vehicles
+    :type nVeh: int
+    :param dim: Dimension of the vehicles. Currently only works for 2D
+    :type dim: int
+    :param model: See model description in BezOptimization class description
+    :type model: dict
+    :param maxAngRate: Maximum angular rate of the vehicle (in radians).
+    :type maxAngRate: float
+    :return: Inequality constraint for the maximum angular rate
+    :rtype: float
+    """
+    y = reshapeVector(x, nVeh, dim, model)
+    tf = model['tf']
+
+    angularRates = []
+    for i in range(nVeh):
+        pos = bez.Bezier(y[i*dim:i*dim+dim, :], tf=tf)
+        angRate = angularRateSqr(pos.elev(10))
+        angularRates.append(angRate)
+
+    angularRateCpts = np.concatenate(
+            [i.cpts.squeeze() for i in angularRates])
+
+    return (maxAngRate**2 - angularRateCpts).squeeze()
+
+
+def _objectiveFunction(x, nVeh, dim, model, minGoal):
+    """Objective function to be optimized.
+
+
+
+    :param x: Optimization vector
+    :type x: numpy.ndarray
+    :param nVeh: Number of vehicles
+    :type nVeh: int
+    :param dim: Dimension of the vehicles. Currently only works for 2D
+    :type dim: int
+    :param model: See model description in BezOptimization class description
+    :type model: dict
+    :param minGoal: Element to be minimized. This string can be one of a few
+        different values:
+            vel - Minimize the sum of velocities of the vehicle trajectories
+            accel - Minimize the sum of accelerations of the vehicle
+                trajectories
+            jerk - Minimize the sum of jerks of the vehicle trajectories
+            euclidean - Minimize the sum of the Euclidean distance between the
+                control points of each trajectory.
+    :type minGoal: str
+    :return: Cost of the current iteration according to the minGoal
+    :rtype: float
+    """
+    y = reshapeVector(x, nVeh, dim, model)
+    tf = model['tf']
+    curves = []
+    minGoal = minGoal.lower()
+
+    if minGoal == 'euclidean':
+        return euclideanObjective(y, nVeh, dim)
+
+    else:
+        for i in range(nVeh):
+            pos = bez.Bezier(y[i*dim:i*dim+dim, :], tf=tf)
+            vel = pos.diff()
+            if minGoal == 'accel':
+                accel = vel.diff()
+                curves.append(accel)
+            if minGoal == 'jerk':
+                jerk = vel.diff().diff()
+                curves.append(jerk)
+
+        summation = 0.0
+        for curve in curves:
+            temp = curve.normSquare()
+            summation = summation + temp.cpts.sum()*100
+
+        return summation
+
+
+@numba.jit(nopython=True)
+def euclideanObjective(y, nVeh, dim):
+    """Sums the Euclidean distance between control points.
+
+    The Euclidean difference between each neighboring pair of control points is
+    summed for each vehicle.
+
+    :param y: Optimized vector that has been reshaped using the reshapeVector
+        function.
+    :type y: numpy.ndarray
+    :param nVeh: Number of vehicles
+    :type nVeh: int
+    :param dim: Dimension of the vehicles. Currently only works for 2D
+    :type dim: int
+    :return: Sum of the Euclidean distances
+    :rtype: float
+    """
+    summation = 0.0
+    temp = np.zeros(3)
+    length = y.shape[1]
+    for veh in range(nVeh):
+        for i in range(length-1):
+            for j in range(dim):
+                temp[j] = y[veh*dim+j, i+1] - y[veh*dim+j, i]
+
+            summation += np.linalg.norm(temp)
+
     return summation
 
-def vector2matrix(x, nVeh, dim, startPoints, endPoints):
-    """
-    Converts the input vector x into a matrix that includes the start and end
-    points of each vehicle in each dimension.
-    
-    The shape of the matrix is as follows:
-        [[v1x1, v1x2, ..., v1xDegree+1], 
-         [v1y1, v1y2, ..., v1yDegree+1],
-         [v1z1, v1z2, ..., v1zDegree+1],
-         [v1dim1, v1dim2, ..., v1dimDegree+1],
-         [v2x1, v2x2, ..., v2xDegree+1],
-         ...
-         [vnVehx1, vnVehx2, ..., vnVehxDegree+1]]
-    """
-    x = np.array(x)
-    numRows = int(nVeh*dim)
-    # Since start and end points aren't included yet, we +1 instead of -1
-    degree = int(x.size/numRows) + 1
-    y = np.zeros((numRows, degree+1))
-    
-    x = x.reshape((numRows, degree-1))
-    y[:,0] = startPoints.reshape(numRows)
-    y[:,1:-1] = x
-    y[:,-1] = endPoints.reshape(numRows)
-    
-    return y
 
-def reshapeVector(x, nVeh, dim, startPoints, endPoints, initAngle, finalAngle):
+def angularRate(bezTraj):
+    """
+    Finds the angular rate of the 2D Bezier Curve.
+
+    The equation for the angular rate is as follows:
+        psiDot = (yDdot*xDot - xDdot*yDot) / (xDot^2 + yDot^2)
+        Note the second derivative (Ddot) vs the first (Dot)
+
+    RETURNS:
+        RationalBezier - This function returns a rational Bezier curve because
+            we must divide two Bezier curves.
+    """
+    if bezTraj.dim != 2:
+        msg = ('The input curve must be two dimensional,\n'
+               'instead it is {} dimensional'.format(bezTraj.dim))
+        raise ValueError(msg)
+
+    x = bezTraj.x
+    xDot = x.diff()
+    xDdot = xDot.diff()
+
+    y = bezTraj.y
+    yDot = y.diff()
+    yDdot = yDot.diff()
+
+    numerator = yDdot*xDot - xDdot*yDot
+    denominator = xDot*xDot + yDot*yDot
+
+    cpts = numerator.cpts / (denominator.cpts)
+    weights = denominator.cpts
+
+    return bez.RationalBezier(cpts, weights)
+
+
+def angularRateSqr(bezTraj):
+    """
+    Finds the squared angular rate of the 2D Bezier Curve.
+
+    The equation for the angular rate is as follows:
+        psiDot = ((yDdot*xDot - xDdot*yDot))^2 / (xDot^2 + yDot^2)^2
+        Note the second derivative (Ddot) vs the first (Dot)
+
+    RETURNS:
+        RationalBezier - This function returns a rational Bezier curve because
+            we must divide two Bezier curves.
+    """
+    if bezTraj.dim != 2:
+        msg = ('The input curve must be two dimensional,\n'
+               'instead it is {} dimensional'.format(bezTraj.dim))
+        raise ValueError(msg)
+
+    x = bezTraj.x
+    xDot = x.diff()
+    xDdot = xDot.diff()
+
+    y = bezTraj.y
+    yDot = y.diff()
+    yDdot = yDot.diff()
+
+    numerator = yDdot*xDot - xDdot*yDot
+    numerator = numerator*numerator
+    denominator = xDot*xDot + yDot*yDot
+    denominator = denominator*denominator
+
+    cpts = numerator.cpts / (denominator.cpts)
+    weights = denominator.cpts
+
+    return bez.RationalBezier(cpts, weights)
+
+
+def reshapeVector(x, nVeh, dim, model=None):
     """
     Converts the input vector x into a matrix that includes the start and end
-    points of each vehicle in each dimension.
-    
+    control points of a Bezier curve for each vehicle in each dimension.
+
     INPUTS:
-        x - 
-        
-        nVeh -
-        
-        dim -
-        
-        startPoints -
-        
-        endPoints -
-        
-        initAngle - Either float or list of floats. If it is a list of floats,
-        length must be = nVeh as the list corresponds to the initial angle of 
-        each vehicle. If it is a single value, all angles are assumed to be the
-        same for every vehicle.
-        
-        finalAngle - Same as initAngle but the final angle.
-    
-    For the angles, the following convension is in effect:
-        * The reference line is the y axis
-        * Positive angles are counter clockwise
-        * The angle is calculated by looking at the angle between the forward
-          facing vector of the robot and the y axis.
-    
+        x - Vector of points to be optimized. The length of the vector depends
+        on the number of vehicles, dimension, and model.
+
+        nVeh - Number of vehicles.
+
+        dim - Dimension of the trajectories (typically 2 or 3)
+
+        model - Dictionary of the model parameters. The dictionary must include
+        the following values:
+            * type: Name of the model. The model names currently supported are
+              "dubins", "generic", and "uav". See below for more information
+              regarding each model.
+            * initAngs: Vector of initial angles, in radians, for each vehicle
+              where each element corresponds to the ith vehicle. The angles
+              follow ROS's REP 103. X is East, Y is North, and Z is up.
+            * finalAngs: Same as initAngs but the final angles instead of the
+              initial angles.
+
+    RETURNS:
+        2D numpy array of Bezier curve control points for each vehicle where
+        each row corresponds to the dimension of the current vehicle. The array
+        will look like this:
+            [[v1x0, v1x1, ..., v1xDegree],
+             [v1y0, v1y1, ..., v1yDegree],
+             [v1z0, v1z1, ..., v1zDegree],
+             [v1dim0, v1dim1, ..., v1dimDegree],
+             [v2x0, v2x1, ..., v2xDegree],
+             ...
+             [vnVehx0, vnVehx1, ..., vnVehxDegree]]
+
+    Model Types:
+        Dubins: Uses the Dubin's car model for a differential drive vehicle.
+        This model type requires the following parameters in the model
+        dictionary: initPoints, finalPoints, initSpeeds, finalSpeeds, initAngs,
+        finalAngs, tf.
+        The input vector x will not include the first two and last two control
+        points for each vehicle. The vector should look like the following
+        [X02, X03, X04, ..., X0DEG-1,
+         Y02, ..., Y0DEG-1,
+         X12, ..., X1DEG-1,
+         ...
+         XN2, ..., XNDEG-1]
+        Note that it is DEG-1 and not DEG-2 because the degree of a Bezier
+        curve is already 1 less than the total number of control points.
+
+        UAV:
+
+        Generic: The only fixed values for the generic model are the start and
+        end points. The input vector x should look like the following
+        [X01, X02, X03, ..., X0DEG,
+        Y01, ..., Y0DEG,
+        Z01, ..., Z0DEG,
+        ...
+        XN1, ..., XNDEG]
+
     The input vector is of the following form:
         [initAngle0, finalAngle0, X01, X02, ..., X0DEG, Y01, Y02, ..., Y0DEG,
          initAngle1, finalAngle1, X11, X12, ..., X1DEG, Y11, Y12, ..., Y1DEG,
          ...
          initAngleNVEH, finalAngleNVEH, ... ]
-    
-    The shape of the matrix is as follows:
-        [[v1x1, v1x2, ..., v1xDegree+1], 
-         [v1y1, v1y2, ..., v1yDegree+1],
-         [v1z1, v1z2, ..., v1zDegree+1],
-         [v1dim1, v1dim2, ..., v1dimDegree+1],
-         [v2x1, v2x2, ..., v2xDegree+1],
-         ...
-         [vnVehx1, vnVehx2, ..., vnVehxDegree+1]]
     """
-    x = np.array(x)
-    numCols = int(x.size/nVeh)
-    degree = (numCols-2)/2 + 3
-    
-    try:
-        initAngle[0]
-    except TypeError:
-        initAngle = [initAngle]*nVeh
-    try:
-        finalAngle[0]
-    except TypeError:
-        finalAngle = [finalAngle]*nVeh
-    
-    init = np.array([])
-    final = np.array([])
-    for i in range(nVeh):
-        d0 = x[i*numCols]
-        df = x[i*numCols+1]
-        init = np.append(init, startPoints[i,0] + d0*np.sin(initAngle[i]))  # X
-        init = np.append(init, startPoints[i,1] + d0*np.cos(initAngle[i]))  # Y
-        final = np.append(final, endPoints[i,0] - df*np.sin(finalAngle[i])) # X
-        final = np.append(final, endPoints[i,1] - df*np.cos(finalAngle[i])) # Y
-    
-    y = np.zeros((int(nVeh*dim), int(degree+1)))
-    
-    x = x.reshape((nVeh, numCols))[:,2:]
-    row, col = x.shape
-    y[:,0] = startPoints.reshape(nVeh*dim)
-    y[:,1] = init
-    y[:,2:-2] = x.reshape((int(row*dim), int(col/dim)))
-    y[:,-2] = final
-    y[:,-1] = endPoints.reshape(nVeh*dim)
-    
-    return y
 
+    x = np.array(x)
+    numRows = int(nVeh*dim)
+    numCols = int(x.size/numRows)
+    x = x.reshape((numRows, numCols))
+
+    # Dict params used by all models
+    modelType = model['type'].lower()
+    initPoints = np.array(model['initPoints'])
+    finalPoints = np.array(model['finalPoints'])
+
+    if modelType == 'dubins':
+        """
+        Dubin's model input vector:
+            [X02, X03, X04, ..., X0DEG-1,
+             Y02, ..., Y0DEG-1,
+             X12, ..., X1DEG-1,
+             ...
+             XN2, ..., XNDEG-1]
+        """
+        if dim != 2:
+            msg = 'The Dubin''s car model only accepts 2 dimensions.'
+            raise ValueError(msg)
+        degree = numCols + 4 - 1
+        y = np.empty((numRows, degree+1))
+
+        # Dict params used by Dubin's model specifically
+        initSpeeds = np.array(model['initSpeeds'])
+        finalSpeeds = np.array(model['finalSpeeds'])
+        initAngs = np.array(model['initAngs'])
+        finalAngs = np.array(model['finalAngs'])
+        tf = model['tf']
+
+        initMag = initSpeeds*tf/degree
+        finalMag = finalSpeeds*tf/degree
+
+#        print('InitPoints: {}'.format(initPoints))
+#        print('InitAngs: {}'.format(initAngs))
+#        print('InitMag: {}'.format(initMag))
+#        print('y[::2, 1]: {}'.format(y[::2, 1]))
+
+        y[:, 2:-2] = x
+        y[::2, 0] = initPoints[:, 0]     # init X
+        y[1::2, 0] = initPoints[:, 1]    # init Y
+        y[::2, -1] = finalPoints[:, 0]   # final X
+        y[1::2, -1] = finalPoints[:, 1]  # final Y
+        y[::2, 1] = initPoints[:, 0] + initMag*np.cos(initAngs)       # X
+        y[1::2, 1] = initPoints[:, 1] + initMag*np.sin(initAngs)      # Y
+        y[::2, -2] = finalPoints[:, 0] - finalMag*np.cos(finalAngs)   # X
+        y[1::2, -2] = finalPoints[:, 1] - finalMag*np.sin(finalAngs)  # Y
+
+    elif modelType == 'generic':
+        """
+        Generic model input vector:
+            [X01, X02, X03, ..., X0DEG,
+            Y01, ..., Y0DEG,
+            Z01, ..., Z0DEG,
+            ...
+            XN1, ..., XNDEG]
+        """
+        degree = numCols + 2 - 1
+        y = np.empty((numRows, degree+1))
+
+        y[::2, 0] = initPoints[:, 0]
+        y[1::2, 0] = initPoints[:, 1]
+        y[::2, -1] = finalPoints[:, 0]
+        y[1::2, -1] = finalPoints[:, 1]
+        y[:, 1:-1] = x
+
+    elif modelType == 'uav':
+        pass
+
+    else:
+        msg = '{} is not a valid model type.'.format(modelType)
+        raise ValueError(msg)
+
+    return y.astype(float)
