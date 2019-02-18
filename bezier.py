@@ -378,6 +378,18 @@ class Bezier(BezierParams):
 
         return curveDot.elev()
 
+    def integrate(self):
+        """Calculates the area under the curve in each dimension
+
+        :return: Area under the curve in each dimension.
+        :rtype: numpy.ndarray
+        """
+        areas = np.empty(self.dim)
+        for d in range(self.dim):
+            areas[d] = self.tf * sum(self.cpts[d]) / (self.deg+1)
+
+        return areas
+
     def split(self, z):
         """Splits the curve into two curves at point z
         source: https://pomax.github.io/bezierinfo/#matrixsplit
