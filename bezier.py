@@ -83,11 +83,12 @@ class BezierParams:
     @tf.setter
     def tf(self, value):
         self._tf = float(value)
+        self._tau = None
 
     @property
     def tau(self):
         if self._tau is None:
-            self._tau = np.arange(0, 1.01, 0.01)
+            self._tau = np.linspace(0, self._tf, 1001)
         else:
             self._tau = np.array(self._tau)
         return self._tau
@@ -95,6 +96,7 @@ class BezierParams:
     @tau.setter
     def tau(self, val):
         self._curve = None
+        self._tf = val[-1]
         self._tau = val
 
 
@@ -174,9 +176,9 @@ class Bezier(BezierParams):
             self._tau = np.arange(0, 1.01, 0.01)
 
         if self._curve is None:
-            self._curve = np.zeros([self.dim, len(self._tau)])
+            self._curve = np.zeros([self.dim, len(self.tau)])
             for i, pts in enumerate(self.cpts):
-                self._curve[i] = bezierCurve(pts, self._tau)
+                self._curve[i] = bezierCurve(pts, self.tau, tf=self.tf)
 
         return self._curve
 
@@ -392,6 +394,13 @@ class Bezier(BezierParams):
 
     def split(self, z):
         """Splits the curve into two curves at point z
+
+        Note that the two returned curves will have the SAME tf value as the
+        original curve. This may result in slightly unexpected behavior for a
+        1D curve when plotting since both slices of the original curve will
+        also be plotted on [0, tf]. The behavior should work as expected when
+        plotting in 2D though.
+
         source: https://pomax.github.io/bezierinfo/#matrixsplit
 
         :param z: Point at which to split the curve
@@ -553,7 +562,7 @@ class Bezier(BezierParams):
             is met.
         :rtype: float or None
         """
-        def fun(x): return bezierCurve(self.cpts[dim, :], x)
+        def fun(x): return bezierCurve(self.cpts[dim, :], x, tf=self._tf)
         _, minVal, status, _ = scipy.optimize.fminbound(fun,
                                                         x1=0,
                                                         x2=1,
@@ -579,7 +588,7 @@ class Bezier(BezierParams):
             is met.
         :rtype: float or None
         """
-        def fun(x): return -bezierCurve(self.cpts[dim, :], x)
+        def fun(x): return -bezierCurve(self.cpts[dim, :], x, tf=self._tf)
         _, maxVal, status, _ = scipy.optimize.fminbound(fun,
                                                         x1=0,
                                                         x2=1,
@@ -617,7 +626,7 @@ class RationalBezier(BezierParams):
         self._weights = np.array(weights, ndmin=2)
 
 
-def bezierCurve(cpts, tau):
+def bezierCurve(cpts, tau, tf=1.0):
     """Computes the values of a 1D Bezier curve defined by the control points.
 
     Creates a 1 dimensional Bezier curve using the designated control points
@@ -634,7 +643,7 @@ def bezierCurve(cpts, tau):
         a one dimensional Bezier curve.
     :type cpts: numpy.ndarray
     :param tau: Values at which to evaluate Bezier curve. Should
-        typically only be on the range of [0,1] but it should work if it's not
+        typically only be on the range of [0,tf] but it should work if it's not
         on that range.
     :type tau: numpy.ndarray
     :return: Numpy array of length tau of the Bezier curve evaluated at each
@@ -642,7 +651,7 @@ def bezierCurve(cpts, tau):
     :rtype: numpy.ndarray
     """
     cpts = np.array(cpts)
-    tau = np.array(tau, dtype=np.float64, ndmin=1)
+    tau = np.array(tau, dtype=np.float64, ndmin=1)/float(tf)
     tauLen = tau.size
     n = cpts.size-1
     curve = np.empty(tauLen)
