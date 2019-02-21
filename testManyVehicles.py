@@ -21,10 +21,11 @@ NUM_VEH = 2
 MAX_SEP = 0.9
 MIN_ELEM = 'accel'
 MIN_VEL = 5
-SEED = 5
+SEED = 6
 
 # TODO:
 #   * Allow 3D point generation.
+
 
 def generateStructuredPoints(numVeh, dim=2, seed=None):
     """
@@ -49,8 +50,8 @@ def generateStructuredPoints(numVeh, dim=2, seed=None):
     startPoints = np.ones((numVeh, dim))*0
     endPoints = np.ones((numVeh, dim))*5
 
-    startPoints[:,0] = np.arange(0, numVeh)
-    endPoints[:,0] = np.arange(0, numVeh)
+    startPoints[:, 0] = np.arange(0, numVeh)
+    endPoints[:, 0] = np.arange(0, numVeh)
 
     np.random.seed(seed)
     np.random.shuffle(startPoints)
@@ -70,6 +71,7 @@ def iterCount(fn):
     wrapper.count = 0
     return wrapper
 
+
 @iterCount
 def minCB(x):
     """
@@ -81,6 +83,7 @@ def minCB(x):
     print('{0:4d}\t{1: 3.6f}\t{2: 3.6f}\t{3: 3.6f}\t{4: 3.6f}'.format(
             minCB.count, x[0], x[1], x[2], x[3]))
 
+
 def animateTrajectory(trajectories):
     global ani
 
@@ -91,7 +94,7 @@ def animateTrajectory(trajectories):
 
     def init():
         for line in lines:
-            line.set_data([],[])
+            line.set_data([], [])
         return lines
 
     def animate(frame):
@@ -116,15 +119,23 @@ def animateTrajectory(trajectories):
 
     plt.show()
 
+
 if __name__ == "__main__":
     plt.close('all')
 
     ###########################################################################
-    ### Prepare data for optimization
+    # Prepare data for optimization
     ###########################################################################
     startPoints, endPoints = generateStructuredPoints(NUM_VEH, seed=SEED)
-    bezOpt = opt.BezOptimization(NUM_VEH, DIM, MAX_SEP, DEG, startPoints,
-                                 endPoints, MIN_ELEM, MIN_VEL)
+    bezOpt = opt.BezOptimization(numVeh=NUM_VEH,
+                                 dimension=DIM,
+                                 degree=DEG,
+                                 minimizeGoal=MIN_ELEM,
+                                 maxSep=MAX_SEP,
+                                 minSpeed=MIN_VEL,
+                                 modelType='Generic',
+                                 initPoints=startPoints,
+                                 finalPoints=endPoints)
     xGuess = bezOpt.generateGuess(random=True, seed=SEED)
 #    xGuess = [0]*6*NUM_VEH*np.random.random(6*NUM_VEH)
     ineqCons = [{'type': 'ineq', 'fun': bezOpt.separationConstraints}]  # ,
@@ -136,7 +147,7 @@ if __name__ == "__main__":
                         [2000]*(DEG-1)*NUM_VEH*DIM)
 
     ###########################################################################
-    ### Optimize and time
+    # Optimize and time
     ###########################################################################
     startTime = time.time()
     results = sop.minimize(
@@ -144,33 +155,31 @@ if __name__ == "__main__":
             x0=xGuess,
             method='SLSQP',
             constraints=ineqCons,
-            options={'ftol':1e-15, 'disp':True},
-            bounds=bounds,
+            options={'ftol': 1e-6, 'disp': True},
+#            bounds=bounds,
             callback=minCB)
     endTime = time.time()
 
     print('---')
     print(results)
     print('---')
-    cpts = opt.reshapeVector(results.x, NUM_VEH, DIM,
-                             startPoints, endPoints, 0, 0)
+    cpts = opt.reshapeVector(results.x, NUM_VEH, DIM, bezOpt.model)
+#    cpts = opt.reshapeVector(xGuess, NUM_VEH, DIM, bezOpt.model)
     print(cpts[0])
     print(cpts[1])
     print('---')
     print('Guess:\n{}\n\nActual:\n{}'.format(
-            opt.reshapeVector(xGuess, NUM_VEH, DIM,
-                              startPoints, endPoints, 0, 0),
-            opt.reshapeVector(results.x, NUM_VEH, DIM,
-                              startPoints, endPoints, 0, 0)))
+            opt.reshapeVector(xGuess, NUM_VEH, DIM, bezOpt.model),
+            opt.reshapeVector(results.x, NUM_VEH, DIM, bezOpt.model)))
     print('---')
     print('Optimization Time: {}s'.format(endTime-startTime))
 
     ###########################################################################
-    ### Plot Results
+    # Plot Results
     ###########################################################################
     plt.figure(1)
-    plt.plot([startPoints[:,0], endPoints[:,0]],
-             [startPoints[:,1], endPoints[:,1]], '.-')
+    plt.plot([startPoints[:, 0], endPoints[:, 0]],
+             [startPoints[:, 1], endPoints[:, 1]], '.-')
     plt.title('Start and End Points of Vehicles', fontsize=28)
     plt.xlabel('X Position', fontsize=20)
     plt.ylabel('Y Position', fontsize=20)
@@ -186,6 +195,6 @@ if __name__ == "__main__":
     plt.xlabel('X Position', fontsize=20)
     plt.ylabel('Y Position', fontsize=20)
 
-    bezOpt.plot(results.x)
+#    bezOpt.plot(results.x)
 
     animateTrajectory(curves)

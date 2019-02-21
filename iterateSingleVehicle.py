@@ -340,8 +340,9 @@ if __name__ == "__main__":
             if not i % 10:
                 print('\n===> Iteration Number {}\n'.format(i))
     finally:
-        fname = 'singleVehicleTests_'+str(uuid.uuid4())+'.pickle'
-        with open(fname, 'wb') as f:
-            pickle.dump(resultsList, f)
+        if len(resultsList) > 1000:
+            fname = 'singleVehicleTests_'+str(uuid.uuid4())+'.pickle'
+            with open(fname, 'wb') as f:
+                pickle.dump(resultsList, f)
 
 #    showSingleVehicleTest(pickTrajectory(resultsList))

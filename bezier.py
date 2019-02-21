@@ -601,10 +601,10 @@ class Bezier(BezierParams):
         try:
             prodM = Bezier.productMatrixCache[self.deg][self.deg]
         except KeyError:
-            prodM = prodMatrix(self.deg)
+            prodM = prodMatrix(self.deg).T
             Bezier.productMatrixCache[self.deg][self.deg] = prodM
 
-        return Bezier(_normSquare(self.cpts, 1, self.dim, prodM),
+        return Bezier(_normSquare(self.cpts, 1, self.dim, prodM.T),
                       tau=self.tau, tf=self.tf)
 
 

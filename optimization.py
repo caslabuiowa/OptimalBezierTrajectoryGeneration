@@ -92,7 +92,7 @@ class BezOptimization:
                  finalSpeeds=None,
                  initAngs=None,
                  finalAngs=None,
-                 tf=None):
+                 tf=1.0):
 
         self.nVeh = numVeh
         self.dim = dimension
@@ -147,31 +147,33 @@ class BezOptimization:
                                               self.model,
                                               minGoal=self.minGoal)
 
-#    def generateGuess(self, random=False, seed=None):
-#        """
-#        Generates an initial guess for the optimizer. Set random to true to
-#        add random noise to the initial guess. You can provide a seed for
-#        deterministic results.
-#        """
-#        if self.dim != 2:
-#            msg = 'Optimization is currently built only for 2 dimensions.'
-#            raise NotImplementedError(msg)
-#
-#        xGuess = []
-#
-#        for i in range(self.nVeh):
-#            for j in range(self.dim):
-#                line = np.linspace(
+    def generateGuess(self, random=False, seed=None):
+        """
+        Generates an initial guess for the optimizer. Set random to true to
+        add random noise to the initial guess. You can provide a seed for
+        deterministic results.
+        """
+        if self.dim != 2:
+            msg = 'Optimization is currently built only for 2 dimensions.'
+            raise NotImplementedError(msg)
+
+        xGuess = []
+
+        for i in range(self.nVeh):
+            for j in range(self.dim):
+                line = np.linspace(
 #                        self.startPoints[i, j],
 #                        self.endPoints[i, j], self.deg+1)
-#
-#                if random:
-#                    np.random.seed(seed)
-#                    line = line + np.random.random(len(line))
-#
-#                xGuess.append(line[1:-1])
-#
-#        return np.concatenate(xGuess)
+                        self.model['initPoints'][i, j],
+                        self.model['finalPoints'][i, j], self.deg+1)
+
+                if random:
+                    np.random.seed(seed)
+                    line = line + np.random.random(len(line))
+
+                xGuess.append(line[1:-1])
+
+        return np.concatenate(xGuess)
 
 
 def _separationConstraints(x, nVeh, dim, model, maxSep):
@@ -359,14 +361,14 @@ def _objectiveFunction(x, nVeh, dim, model, minGoal):
             if minGoal == 'accel':
                 accel = vel.diff()
                 curves.append(accel)
-            if minGoal == 'jerk':
+            elif minGoal == 'jerk':
                 jerk = vel.diff().diff()
                 curves.append(jerk)
 
         summation = 0.0
         for curve in curves:
             temp = curve.normSquare()
-            summation = summation + temp.cpts.sum()*100
+            summation = summation + temp.cpts.sum()
 
         return summation
 
