@@ -323,10 +323,20 @@ class Bezier(BezierParams):
                            type(denominator))
             raise TypeError(msg)
 
-        cpts = self.cpts.astype(np.float64) / denominator.cpts
+        cpts = np.empty((self.dim, self.deg+1))
+        for i in range(self.dim+1):
+            for j in range(self.deg+2):
+                if self.cpts[i, j] == 0:
+                    cpts[i, j] = 0
+                else:
+                    cpts[i, j] = self.cpts[i, j] / denominator.cpts[i, j]
+
+#        cpts = self.cpts.astype(np.float64) / denominator.cpts
         weights = denominator.cpts
 
-        return RationalBezier(cpts, weights, tau=self.tau, tf=self.tf)
+        return RationalBezier(cpts.astype(np.float64),
+                              weights.astype(np.float64),
+                              tau=self.tau, tf=self.tf)
 
     def elev(self, R=1):
         """Elevates the degree of the Bezier curve
@@ -456,6 +466,7 @@ class Bezier(BezierParams):
         :rtype: float or None
         """
         minVal = min(self.cpts[dim, :])
+        tol = np.abs(tol*np.mean(self.cpts))
 
         if self.cpts[dim, 0] == minVal:
             return self.cpts[dim, 0]
@@ -490,7 +501,7 @@ class Bezier(BezierParams):
             print('Maximum number of iterations met')
             return None
 
-    def max(self, dim=0, tol=1e-6, maxIter=1000):
+    def max4(self, dim=0, tol=1e-6, maxIter=1000):
         """Returns the maximum value of the Bezier curve in a single dimension
 
         Finds the maximum value of the Bezier curve. This is done by first
@@ -538,13 +549,74 @@ class Bezier(BezierParams):
                     newCurve = c2
                     newMax = max2
 
-                if np.abs(newMax-lastMax) < tol:
+                if np.abs(newMax-lastMax)/newMax < tol:
                     return newMax
                 else:
                     lastMax = newMax
 
             print('Maximum number of iterations met')
             return None
+
+    def max(self, dim=0, globMax=np.inf, tol=1e-6):  # , maxIter=1000):
+        """Returns the maximum value of the Bezier curve in a single dimension
+
+        Finds the maximum value of the Bezier curve. This is done by first
+        checking the first and last control points since the first and last
+        point lie on the curve. If the first or last control point is not the
+        maximum value, the curve is split at the highest control point. The new
+        maximum value is then defined as the highest control point of the two
+        new curves. This continues until the difference between the new maximum
+        and old maximum values is within the desired tolerance.
+
+        :param dim: Which dimension to return the maximum of.
+        :type dim: int
+        :param tol: Tolerance of the maximum value.
+        :type tol: float
+        :param maxIter: Maximum number of iterations to search for the minimum.
+        :type maxIter: int
+        :return: Maximum value of the Bezier curve. None if maximum iterations
+            is met.
+        :rtype: float or None
+        """
+        maxIdx = np.argmax(self.cpts[dim, :])
+        newMax = max(self.cpts[dim, :])
+
+        error = np.abs(globMax-newMax) / newMax
+
+        if error < tol:
+            return newMax
+        elif maxIdx != 0 and maxIdx != self.deg:
+            splitPoint = maxIdx / self.deg
+            c1, c2 = self.split(splitPoint)
+            c1max = c1.max(dim=dim, globMax=newMax, tol=tol)
+            c2max = c2.max(dim=dim, globMax=newMax, tol=tol)
+
+            newMax = max((c1max, c2max))
+
+        return newMax
+
+    def max3(self, dim=0, tol=1e-3, maxIter=1000):
+        maxIdx = np.argmax(self.cpts[dim, :])
+        oldMax = max(self.cpts[dim, :])
+
+        oldCurve = self.copy()
+
+        if maxIdx == 0 or maxIdx == self.deg:
+            newMax = oldMax
+        else:
+            for _ in range(maxIter):
+                newCurve = oldCurve.elev(oldCurve.deg+10)
+                newMax = max(newCurve.cpts[dim, :])
+
+                error = np.abs(newMax-oldMax) / newMax
+
+                if error < tol:
+                    break
+
+                oldMax = newMax
+                oldCurve = newCurve.copy()
+
+        return newMax
 
     def min2(self, dim=0, tol=1e-6, maxIter=1000):
         """Uses scipy's fminbound to find the minimum value of the Bezier curve

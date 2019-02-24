@@ -194,8 +194,17 @@ def _separationConstraints(x, nVeh, dim, model, maxSep):
     :param maxSep: Maximum separation between vehicles.
     :type maxSep: float
     """
+    y = reshapeVector(x, nVeh, dim, model)
+    if model['type'].lower() == 'obstacles':
+            nVeh += 2
+            obs = np.empty((4, y.shape[1]))
+            obs[0, :] = 3
+            obs[1, :] = 2
+            obs[2, :] = 6
+            obs[3, :] = 7
+            y = np.vstack((y, obs))
+
     if nVeh > 1:
-        y = reshapeVector(x, nVeh, dim, model)
         tf = model['tf']
 
         distVeh = []
@@ -206,7 +215,6 @@ def _separationConstraints(x, nVeh, dim, model, maxSep):
         for i in range(nVeh):
             for j in range(i, nVeh):
                 if j > i:
-#                    dv = bez.Bezier(vehList[i].cpts - vehList[j].cpts, tf=tf)
                     dv = vehList[i] - vehList[j]
                     distVeh.append(dv.normSquare().elev(10))
 
@@ -215,6 +223,44 @@ def _separationConstraints(x, nVeh, dim, model, maxSep):
         return (distances - maxSep**2).squeeze()
     else:
         return None
+
+
+#def _separationConstraints(x, nVeh, dim, model, maxSep):
+#    """Calculate the separation between vehicles.
+#
+#    The maximum separation is found by degree elevation.
+#
+#    NOTE: This only works for 2 dimensions.
+#
+#    :param x: Optimization vector
+#    :type x: numpy.ndarray
+#    :param nVeh: Number of vehicles
+#    :type nVeh: int
+#    :param dim: Dimension of the vehicles. Currently only works for 2D
+#    :type dim: int
+#    :param model: See model description in BezOptimization class description
+#    :type model: dict
+#    :param maxSep: Maximum separation between vehicles.
+#    :type maxSep: float
+#    """
+#    if nVeh > 1:
+#        y = reshapeVector(x, nVeh, dim, model)
+#        tf = model['tf']
+#
+#        distVeh = []
+#        vehList = []
+#        for i in range(nVeh):
+#            vehList.append(bez.Bezier(y[i*dim:i*dim+dim, :], tf=tf))
+#
+#        for i in range(nVeh):
+#            for j in range(i, nVeh):
+#                if j > i:
+#                    dv = vehList[i] - vehList[j]
+#                    distVeh.append(dv.normSquare().min())
+#
+#        return np.array(distVeh) - maxSep**2
+#    else:
+#        return None
 
 
 def _minSpeedConstraints(x, nVeh, dim, model, minSpeed):
@@ -280,7 +326,7 @@ def _maxSpeedConstraints(x, nVeh, dim, model, maxSpeed):
         speed = pos.diff()
         speeds.append(speed)
 
-    speedSqr = [curve.normSquare().elev(50) for curve in speeds]
+    speedSqr = [curve.normSquare().elev(10) for curve in speeds]
 
     speeds = np.concatenate([i.cpts.squeeze() for i in speedSqr])
 
@@ -540,7 +586,6 @@ def reshapeVector(x, nVeh, dim, model=None):
          ...
          initAngleNVEH, finalAngleNVEH, ... ]
     """
-
     x = np.array(x)
     numRows = int(nVeh*dim)
     numCols = int(x.size/numRows)
@@ -551,7 +596,7 @@ def reshapeVector(x, nVeh, dim, model=None):
     initPoints = np.array(model['initPoints'])
     finalPoints = np.array(model['finalPoints'])
 
-    if modelType == 'dubins':
+    if modelType == 'dubins' or modelType == 'obstacles':
         """
         Dubin's model input vector:
             [X02, X03, X04, ..., X0DEG-1,
@@ -611,6 +656,24 @@ def reshapeVector(x, nVeh, dim, model=None):
 
     elif modelType == 'uav':
         pass
+
+#    elif modelType == 'obstacles':
+#        """
+#        Obstacles model input vector:
+#            [X01, X02, X03, ..., X0DEG,
+#            Y01, ..., Y0DEG,
+#            Z01, ..., Z0DEG,
+#            ...
+#            XN1, ..., XNDEG]
+#        """
+#        degree = numCols + 2 - 1
+#        y = np.empty((numRows, degree+1))
+#
+#        y[::2, 0] = initPoints[:, 0]
+#        y[1::2, 0] = initPoints[:, 1]
+#        y[::2, -1] = finalPoints[:, 0]
+#        y[1::2, -1] = finalPoints[:, 1]
+#        y[:, 1:-1] = x
 
     else:
         msg = '{} is not a valid model type.'.format(modelType)

@@ -17,9 +17,9 @@ import bezier as bez
 
 DIM = 2
 DEG = 5
-NUM_VEH = 2
+NUM_VEH = 10
 MAX_SEP = 0.9
-MIN_ELEM = 'accel'
+MIN_ELEM = 'euclidean'
 MIN_VEL = 5
 SEED = 6
 
@@ -136,7 +136,7 @@ if __name__ == "__main__":
                                  modelType='Generic',
                                  initPoints=startPoints,
                                  finalPoints=endPoints)
-    xGuess = bezOpt.generateGuess(random=True, seed=SEED)
+#    xGuess = bezOpt.generateGuess(random=True, seed=SEED)
 #    xGuess = [0]*6*NUM_VEH*np.random.random(6*NUM_VEH)
     ineqCons = [{'type': 'ineq', 'fun': bezOpt.separationConstraints}]  # ,
                 #{'type': 'ineq', 'fun': bezOpt.maxVelConstraints},
@@ -155,7 +155,9 @@ if __name__ == "__main__":
             x0=xGuess,
             method='SLSQP',
             constraints=ineqCons,
-            options={'ftol': 1e-6, 'disp': True},
+            options={'ftol': 1e-6,
+                     'maxiter': 250,
+                     'disp': True},
 #            bounds=bounds,
             callback=minCB)
     endTime = time.time()
