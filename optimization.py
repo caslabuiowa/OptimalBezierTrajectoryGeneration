@@ -104,8 +104,8 @@ class BezOptimization:
         self.maxAngRate = maxAngRate
 
         self.model = {'type': modelType,
-                      'initPoints': initPoints,
-                      'finalPoints': finalPoints,
+                      'initPoints': np.atleast_2d(initPoints),
+                      'finalPoints': np.atleast_2d(finalPoints),
                       'initSpeeds': initSpeeds,
                       'finalSpeeds': finalSpeeds,
                       'initAngs': initAngs,
@@ -656,6 +656,18 @@ def reshapeVector(x, nVeh, dim, model=None):
 
     elif modelType == 'uav':
         pass
+
+    elif modelType == '3d':
+        degree = numCols + 2 - 1
+        y = np.empty((numRows, degree+1))
+
+        y[::3, 0] = initPoints[:, 0]
+        y[1::3, 0] = initPoints[:, 1]
+        y[2::3, 0] = initPoints[:, 2]
+        y[::3, -1] = finalPoints[:, 0]
+        y[1::3, -1] = finalPoints[:, 1]
+        y[2::3, -1] = finalPoints[:, 2]
+        y[:, 1:-1] = x
 
 #    elif modelType == 'obstacles':
 #        """

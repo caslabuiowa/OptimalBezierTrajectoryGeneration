@@ -214,11 +214,13 @@ class Bezier(BezierParams):
 
         if self.dim == 1:
             ax.plot(self.tau, self.curve[0])
-            ax.plot(np.linspace(0, self.tf, self.deg+1),
-                    self.cpts.squeeze(), '.--')
+            if showCpts:
+                ax.plot(np.linspace(0, self.tf, self.deg+1),
+                        self.cpts.squeeze(), '.--')
         elif self.dim == 2:
             ax.plot(self.curve[0], self.curve[1])
-            ax.plot(cpts[0], cpts[1], '.--')
+            if showCpts:
+                ax.plot(cpts[0], cpts[1], '.--')
         else:
             # Check whether ax is 3D
             if not hasattr(ax, 'get_zlim'):
@@ -226,7 +228,8 @@ class Bezier(BezierParams):
                 ax.remove()
                 ax = parent.add_subplot(111, projection='3d')
             ax.plot(self.curve[0], self.curve[1], self.curve[2])
-            ax.plot(self.cpts[0], self.cpts[1], self.cpts[2], '.--')
+            if showCpts:
+                ax.plot(self.cpts[0], self.cpts[1], self.cpts[2], '.--')
 
         return ax
 
@@ -268,8 +271,8 @@ class Bezier(BezierParams):
         :rtype: Bezier
         """
         if not isinstance(multiplicand, Bezier):
-            msg = 'The multiplicand must be a Bezier object, not a {}'.format(
-                    type(multiplicand))
+            msg = 'The multiplicand must be a {} object, not a {}'.format(
+                    Bezier, type(multiplicand))
             raise TypeError(msg)
 
         dim = self.dim
