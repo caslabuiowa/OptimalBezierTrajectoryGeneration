@@ -15,3 +15,7 @@ By applying a desired cost function and constraints, the optimal trajectories fo
 ## Displaying Results
 
 Once the optimal trajectories have been generated, the results are displayed to the user. This is important when debugging trajectories and further improving the code. When used on a robot, it is advised that the engineer supress any plots being produced.
+
+## Important Notes
+
+Due to a bug in previous version of the Scipy package, it is important that you use version 1.2.0 or higher. In earlier versions, the minimizing routine would return successfully even if the constraints to the problem were not met.
