@@ -195,7 +195,8 @@ def _separationConstraints(x, nVeh, dim, model, maxSep):
     :type maxSep: float
     """
     y = reshapeVector(x, nVeh, dim, model)
-    if model['type'].lower() == 'obstacles':
+    if model['type'].lower() == 'obstacles' or \
+       model['type'].lower() == 'timeopt':
             nVeh += 2
             obs = np.empty((4, y.shape[1]))
             obs[0, :] = 3
@@ -205,7 +206,10 @@ def _separationConstraints(x, nVeh, dim, model, maxSep):
             y = np.vstack((y, obs))
 
     if nVeh > 1:
-        tf = model['tf']
+        if model['type'].lower() == 'timeopt':
+            tf = x[-1]
+        else:
+            tf = model['tf']
 
         distVeh = []
         vehList = []
@@ -243,9 +247,23 @@ def _separationConstraints(x, nVeh, dim, model, maxSep):
 #    :param maxSep: Maximum separation between vehicles.
 #    :type maxSep: float
 #    """
+#
+#    y = reshapeVector(x, nVeh, dim, model)
+#    if model['type'].lower() == 'obstacles' or \
+#       model['type'].lower() == 'timeopt':
+#            nVeh += 2
+#            obs = np.empty((4, y.shape[1]))
+#            obs[0, :] = 3
+#            obs[1, :] = 2
+#            obs[2, :] = 6
+#            obs[3, :] = 7
+#            y = np.vstack((y, obs))
+#
 #    if nVeh > 1:
-#        y = reshapeVector(x, nVeh, dim, model)
-#        tf = model['tf']
+#        if model['type'].lower() == 'timeopt':
+#            tf = x[-1]
+#        else:
+#            tf = model['tf']
 #
 #        distVeh = []
 #        vehList = []
@@ -282,7 +300,10 @@ def _minSpeedConstraints(x, nVeh, dim, model, minSpeed):
     :rtype: float
     """
     y = reshapeVector(x, nVeh, dim, model)
-    tf = model['tf']
+    if model['type'].lower() == 'timeopt':
+        tf = x[-1]
+    else:
+        tf = model['tf']
 
     speeds = []
 
@@ -317,7 +338,10 @@ def _maxSpeedConstraints(x, nVeh, dim, model, maxSpeed):
     :rtype: float
     """
     y = reshapeVector(x, nVeh, dim, model)
-    tf = model['tf']
+    if model['type'].lower() == 'timeopt':
+        tf = x[-1]
+    else:
+        tf = model['tf']
 
     speeds = []
 
@@ -353,7 +377,10 @@ def _maxAngularRateConstraints(x, nVeh, dim, model, maxAngRate):
     :rtype: float
     """
     y = reshapeVector(x, nVeh, dim, model)
-    tf = model['tf']
+    if model['type'].lower() == 'timeopt':
+        tf = x[-1]
+    else:
+        tf = model['tf']
 
     angularRates = []
     for i in range(nVeh):
@@ -399,6 +426,9 @@ def _objectiveFunction(x, nVeh, dim, model, minGoal):
 
     if minGoal == 'euclidean':
         return euclideanObjective(y, nVeh, dim)
+
+    elif minGoal == 'time':
+        return x[-1]
 
     else:
         for i in range(nVeh):
@@ -589,6 +619,9 @@ def reshapeVector(x, nVeh, dim, model=None):
     x = np.array(x)
     numRows = int(nVeh*dim)
     numCols = int(x.size/numRows)
+    if model['type'].lower() == 'timeopt':
+        timeOptTf = x[-1]
+        x = x[:-1]
     x = x.reshape((numRows, numCols))
 
     # Dict params used by all models
@@ -596,7 +629,8 @@ def reshapeVector(x, nVeh, dim, model=None):
     initPoints = np.array(model['initPoints'])
     finalPoints = np.array(model['finalPoints'])
 
-    if modelType == 'dubins' or modelType == 'obstacles':
+    if modelType == 'dubins' or modelType == 'obstacles' or \
+       modelType == 'timeopt':
         """
         Dubin's model input vector:
             [X02, X03, X04, ..., X0DEG-1,
@@ -616,7 +650,10 @@ def reshapeVector(x, nVeh, dim, model=None):
         finalSpeeds = np.array(model['finalSpeeds'])
         initAngs = np.array(model['initAngs'])
         finalAngs = np.array(model['finalAngs'])
-        tf = model['tf']
+        if modelType == 'timeopt':
+            tf = timeOptTf
+        else:
+            tf = model['tf']
 
         initMag = initSpeeds*tf/degree
         finalMag = finalSpeeds*tf/degree
@@ -668,6 +705,16 @@ def reshapeVector(x, nVeh, dim, model=None):
         y[1::3, -1] = finalPoints[:, 1]
         y[2::3, -1] = finalPoints[:, 2]
         y[:, 1:-1] = x
+
+#    elif modelType == 'timeopt':
+#        degree = numCols + 2 - 1
+#        y = np.empty((numRows, degree+1))
+#
+#        y[::2, 0] = initPoints[:, 0]
+#        y[1::2, 0] = initPoints[:, 1]
+#        y[::2, -1] = finalPoints[:, 0]
+#        y[1::2, -1] = finalPoints[:, 1]
+#        y[:, 1:-1] = x
 
 #    elif modelType == 'obstacles':
 #        """
