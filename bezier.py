@@ -3,6 +3,10 @@
 """
 Created on Fri Jan 25 10:20:47 2019
 
+Note that all sources titled "Paper Reference: ..." refer to the paper
+"Bernstein Polynomial Toolkit for Trajectory Generation in Multiple Autonomous
+Vehicle Missions" written by Calvin Kielas-Jensen and Venanzio Cichella.
+
 @author: ckielasjensen
 """
 
@@ -243,6 +247,8 @@ class Bezier(BezierParams):
     def add(self, other):
         """Adds two Bezier curves
 
+        Paper Reference: Property 7: Arithmetic Operations
+
         :param other: Other Bezier curve to be added
         :type other: Bezier
         :return: Sum of the two Bezier curves
@@ -256,6 +262,8 @@ class Bezier(BezierParams):
     def sub(self, other):
         """Subtracts two Bezier curves
 
+        Paper Reference: Property 7: Arithmetic Operations
+
         :param other: Bezier curve to subtract from the original
         :type other: Bezier
         :return: Original curve - Other curve
@@ -268,6 +276,8 @@ class Bezier(BezierParams):
 
     def mul(self, multiplicand):
         """Computes the product of two Bezier curves.
+
+        Paper Reference: Property 7: Arithmetic Operations
 
         Source: Section 5.1 of "The Bernstein Polynomial Basis: A Centennial
         Retrospective" by Farouki.
@@ -327,9 +337,8 @@ class Bezier(BezierParams):
 
         The division of two Bezier curves results in a rational Bezier curve.
 
-        RETURNS:
-            RationalBezier object resulting in the division of two Bezier
-                curves.
+        Paper Reference: Property 7: Arithmetic Operations
+
         :param denominator: Denominator of the division
         :type denominator: Bezier
         :return: Rational Bezier curve representing the division of the two
@@ -350,7 +359,6 @@ class Bezier(BezierParams):
                 else:
                     cpts[i, j] = self.cpts[i, j] / denominator.cpts[i, j]
 
-#        cpts = self.cpts.astype(np.float64) / denominator.cpts
         weights = denominator.cpts
 
         return RationalBezier(cpts.astype(np.float64),
@@ -715,6 +723,89 @@ class RationalBezier(BezierParams):
     def __init__(self, cpts=None, weights=None, tau=None, tf=1.0):
         super().__init__(cpts=cpts, tau=tau, tf=tf)
         self._weights = np.array(weights, ndmin=2)
+
+
+@numba.njit
+def deCasteljauCurve(cpts, tau):
+    """Returns a Bezier curve using the de Casteljau algorithm
+
+    Uses the de Casteljau algorithm to generate the Bezier curve defined by
+    the provided control points. Note that the datatypes are important due to
+    the nature of the numba library.
+
+    Paper Reference: Property 5: The de Casteljau Algorithm
+
+    :param cpts: Control points defining the 1D Bezier curve.
+    :type cpts: numpy.ndarray(dtype=numpy.float64)
+    :param tau: Values at which to evaluate Bezier curve. Must be within the
+        range of [0,tf].
+    :type tau: numpy.ndarray(dtype=numpy.float64)
+    :return: Numpy array of length tau of the Bezier curve evaluated at each
+        value of tau.
+    :rtype: numpy.ndarray(dtype=numpy.float64)
+    """
+    tau = tau/tau[-1]
+    curveLen = tau.size
+    curve = np.empty(curveLen)
+    curveIdx = 0
+
+    for t in tau:
+        newCpts = cpts.copy()
+        while newCpts.size > 1:
+            cptsTemp = np.empty(newCpts.size-1)
+            for i in range(cptsTemp.size):
+                cptsTemp[i] = (1-t)*newCpts[i] + t*newCpts[i+1]
+            newCpts = cptsTemp.copy()
+        curve[curveIdx] = newCpts[0]
+        curveIdx += 1
+
+    return curve
+
+
+@numba.njit
+def deCasteljauSplit(cpts, tDiv, tf=1.0):
+    """Uses the de Casteljau algorithm to split the curve at tDiv
+
+    This function is similar to the de Casteljau curve function but instead of
+    drawing a curve, it returns two sets of control points which define the
+    curve to the left and to the right of the split point, tDiv.
+
+    Paper Reference: Property 5: The de Casteljau Algorithm
+
+    :param cpts: Control points defining the 1D Bezier curve.
+    :type cpts: numpy.ndarray(dtype=numpy.float64)
+    :param tDiv: Point at which to divide the curve.
+    :type tDiv: float
+    :param tf: Final tau value for the 1D curve. Default is 1.0. Note that the
+        Bezier curve is defined on the range of [0, tf].
+    :type tf: float
+    :return: Returns a tuple of numpy arrays. The zeroth element is the
+        control points defining the curve to the left of tDiv. The first
+        element is the control points defining the curve to the right of tDiv.
+    :rtype: tuple(numpy.ndarray, numpy.ndarray)
+    """
+    tDiv = tDiv/tf
+    cptsLeft = np.zeros(cpts.size)
+    cptsRight = np.zeros(cpts.size)
+    idx = 0
+
+    newCpts = cpts.copy()
+    cptsTemp = cpts.copy()
+    while newCpts.size > 1:
+        cptsLeft[idx] = cptsTemp[0]
+        cptsRight[idx] = cptsTemp[-1]
+        idx += 1
+
+        cptsTemp = np.empty(newCpts.size-1)
+        for i in range(cptsTemp.size):
+            cptsTemp[i] = (1-tDiv)*newCpts[i] + tDiv*newCpts[i+1]
+
+        newCpts = cptsTemp.copy()
+
+    cptsLeft[-1] = cptsRight[-1] = newCpts[0]
+
+
+    return cptsLeft, cptsRight
 
 
 def bezierCurve(cpts, tau, tf=1.0):
