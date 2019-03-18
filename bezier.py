@@ -9,6 +9,7 @@ Created on Fri Jan 25 10:20:47 2019
 from collections import defaultdict
 
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 import numba
 import numpy as np
 import scipy.optimize
@@ -37,6 +38,9 @@ class BezierParams:
         self._tau = tau
         self._tf = float(tf)
         self._curve = None
+
+        if tau is None:
+            self._tau = np.linspace(0, self._tf, 1001)
 
         if cpts is not None:
             self._cpts = np.array(cpts, ndmin=2)
@@ -190,7 +194,7 @@ class Bezier(BezierParams):
         """
         return Bezier(self.cpts, self.tau, self.tf)
 
-    def plot(self, axisHandle=None):
+    def plot(self, axisHandle=None, showCpts=True, **kwargs):
         """Plots the Bezier curve in 1D or 2D
 
         Note: Currently only supports plotting in 1D or 2D.
@@ -198,26 +202,41 @@ class Bezier(BezierParams):
         :param axisHandle: Handle to the figure axis. If it is None, a new
             figure will be plotted.
         :type axisHandle: matplotlib.axes._subplots.AxesSubplot or None
+        :param showCpts: Flag that decides whether to show the control points
+            in the plot. Default is True.
+        :type showCpts: bool
+        :param **kwargs: Keyword arguments passed into the plot command. Note
+            that the arguments are only passed into the plot command that
+            plots the curve and not the command that plots the control points.
+        :type **kwargs: dict
         :return: Axis object where the curve was plotted.
         :rtype: matplotlib.axes._subplots.AxesSubplot
         """
         if axisHandle is None:
-            fig = plt.figure()
-            ax = fig.add_subplot(1, 1, 1)
+            fig, ax = plt.subplots()
         else:
             ax = axisHandle
 
         cpts = np.asarray(self.cpts)
 
         if self.dim == 1:
-            ax.plot(self.tau, self.curve[0])
-            ax.plot(np.linspace(0, self.tf, self.deg+1),
-                    self.cpts.squeeze(), '.--')
+            ax.plot(self.tau, self.curve[0], **kwargs)
+            if showCpts:
+                ax.plot(np.linspace(0, self.tf, self.deg+1),
+                        self.cpts.squeeze(), '.--')
         elif self.dim == 2:
-            ax.plot(self.curve[0], self.curve[1])
-            ax.plot(cpts[0], cpts[1], '.--')
+            ax.plot(self.curve[0], self.curve[1], **kwargs)
+            if showCpts:
+                ax.plot(cpts[0], cpts[1], '.--')
         else:
-            print('WARNING: Only 1D and 2D Plotting are Supported for Now')
+            # Check whether ax is 3D
+            if not hasattr(ax, 'get_zlim'):
+                parent = ax.get_figure()
+                ax.remove()
+                ax = parent.add_subplot(111, projection='3d')
+            ax.plot(self.curve[0], self.curve[1], self.curve[2], **kwargs)
+            if showCpts:
+                ax.plot(self.cpts[0], self.cpts[1], self.cpts[2], '.--')
 
         return ax
 
@@ -259,8 +278,8 @@ class Bezier(BezierParams):
         :rtype: Bezier
         """
         if not isinstance(multiplicand, Bezier):
-            msg = 'The multiplicand must be a Bezier object, not a {}'.format(
-                    type(multiplicand))
+            msg = 'The multiplicand must be a {} object, not a {}'.format(
+                    Bezier, type(multiplicand))
             raise TypeError(msg)
 
         dim = self.dim

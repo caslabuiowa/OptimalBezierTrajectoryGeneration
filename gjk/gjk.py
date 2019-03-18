@@ -6,6 +6,11 @@ Created on Sun Nov 11 21:25:46 2018
 @author: ckielasjensen
 """
 
+# For spatial separation, simply return a value like 0 or -1 if a collision is
+# detected. That way the algorithm won't continuously run. The 0 or -1 will
+# work with the minimum spatial separation because it looks for the upper
+# bound of minimum values. Check out Algorithm 2 from the paper.
+
 # NOTE: This library uses the numba library to significantly spead up certain
 #   operations.
 
@@ -24,7 +29,7 @@ def gjk(polygon1, polygon2, method='nearest', *args, **kwargs):
 
 
 @njit
-def gjkNearest(polygon1, polygon2, maxIter=1000):
+def gjkNearest(polygon1, polygon2, maxIter=10):
     """
     Finds the shortest distance between two polygons using the GJK algorithm.
     It will hit the maximum number of iterations if the polygons overlap.
@@ -66,8 +71,8 @@ def gjkNearest(polygon1, polygon2, maxIter=1000):
             direction = p2
             directionMag = p2Mag
 
-    print('WARNING: Maximum number of iterations met.')
-    return None
+#    print('WARNING: Maximum number of iterations met.')
+    return -1
 
 
 def gjkCollision(polygon1, polygon2):
@@ -234,6 +239,7 @@ if __name__ == "__main__":
             (8, 6, 0),
             (10, 2, 0),
             (13, 1, 0),
+            (12, 3, 0),
             (15, 6, 0)
             ])
 
