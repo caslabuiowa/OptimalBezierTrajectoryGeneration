@@ -39,6 +39,9 @@ class BezierParams:
         self._tf = float(tf)
         self._curve = None
 
+        if tau is None:
+            self._tau = np.linspace(0, self._tf, 1001)
+
         if cpts is not None:
             self._cpts = np.array(cpts, ndmin=2)
             self._dim = self._cpts.shape[0]
@@ -202,8 +205,9 @@ class Bezier(BezierParams):
         :param showCpts: Flag that decides whether to show the control points
             in the plot. Default is True.
         :type showCpts: bool
-        :**kwargs: Keyword arguments to be passed into the call to plot the
-            curve. Note that no arguments can be passed into the cpts plot call
+        :param **kwargs: Keyword arguments passed into the plot command. Note
+            that the arguments are only passed into the plot command that
+            plots the curve and not the command that plots the control points.
         :type **kwargs: dict
         :return: Axis object where the curve was plotted.
         :rtype: matplotlib.axes._subplots.AxesSubplot
