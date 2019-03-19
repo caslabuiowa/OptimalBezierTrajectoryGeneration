@@ -205,7 +205,7 @@ class BezOptimization:
 
         for i in range(numVeh):
             for j in range(dim):
-                if initSpeeds is None:
+                if initSpeeds[0] is None:
                     line = np.linspace(initPoints[i, j],
                                        finalPoints[i, j],
                                        deg+1)
@@ -269,7 +269,7 @@ class BezOptimization:
                 y[i*dim:(i+1)*dim, 0] = initPoints[i]
                 y[i*dim:(i+1)*dim, -1] = finalPoints[i]
 
-        if initSpeeds is not None:
+        if initSpeeds[0] is not None:
             offset += 1
 
             initMag = initSpeeds*tf/deg

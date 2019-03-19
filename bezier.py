@@ -430,8 +430,8 @@ class Bezier(BezierParams):
 
         return areas
 
-    def split(self, z):
-        """Splits the curve into two curves at point z
+    def split(self, tDiv):
+        """Splits the curve into two curves at point tDiv
 
         Note that the two returned curves will have the SAME tf value as the
         original curve. This may result in slightly unexpected behavior for a
@@ -439,30 +439,20 @@ class Bezier(BezierParams):
         also be plotted on [0, tf]. The behavior should work as expected when
         plotting in 2D though.
 
-        source: https://pomax.github.io/bezierinfo/#matrixsplit
+        Paper Reference: Property 5: The de Casteljau Algorithm
 
-        :param z: Point at which to split the curve
-        :type z: float
+        :param tDiv: Point at which to split the curve
+        :type tDiv: float
         :return: Tuple of curves. One before the split point and one after.
         :rtype: tuple(Bezier, Bezier)
         """
-        try:
-            Q, Qp = Bezier.splitCache[self.deg][z]
-        except KeyError:
-            try:
-                coefMat = Bezier.bezCoefCache[self.deg]
-            except KeyError:
-                coefMat = buildBezMatrix(self.deg)
-                Bezier.bezCoefCache[self.deg] = coefMat
-
-            Q, Qp = splitCurveMat(self.deg, z, coefMat)
-            Bezier.splitCache[self.deg][z] = (Q, Qp)
-
         cpts1 = []
         cpts2 = []
+
         for d in range(self.dim):
-            cpts1.append(Q.dot(self.cpts[d, :]))
-            cpts2.append(Qp.dot(self.cpts[d, :]))
+            left, right = deCasteljauSplit(self.cpts[d, :], tDiv, self.tf)
+            cpts1.append(left)
+            cpts2.append(right)
 
         c1 = self.copy()
         c2 = self.copy()
