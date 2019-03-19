@@ -72,7 +72,7 @@ def gjkNearest(polygon1, polygon2, maxIter=10):
             directionMag = p2Mag
 
 #    print('WARNING: Maximum number of iterations met.')
-    return -1
+    return 0.0
 
 
 def gjkCollision(polygon1, polygon2):

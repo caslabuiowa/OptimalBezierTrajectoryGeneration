@@ -21,6 +21,15 @@ import scipy.optimize
 from scipy.special import binom
 
 
+#TODO:
+#   Implement curve using Bernstein basis instead of de cast
+#   Precompute function to be called before optimizer
+#   Min dist 3D
+#   JIT ahead of time compiling
+#   Priorities:
+# 1. GJK for 3D
+# 2. Speed
+# 3.
 class BezierParams:
     """Parent class used for storing Bezier parameters
 
@@ -187,7 +196,7 @@ class Bezier(BezierParams):
         if self._curve is None:
             self._curve = np.zeros([self.dim, len(self.tau)])
             for i, pts in enumerate(self.cpts):
-                self._curve[i] = deCasteljauCurve(pts, self.tau)
+                self._curve[i] = deCasteljauCurve(pts, self.tau, self.tf)
 
         return self._curve
 
@@ -575,6 +584,8 @@ class Bezier(BezierParams):
 #            print('Maximum number of iterations met')
 #            return None
 
+# TODO:
+#   Change error to be absolute not normalized (look @ paper)
     def max(self, dim=0, globMax=np.inf, tol=1e-6):  # , maxIter=1000):
         """Returns the maximum value of the Bezier curve in a single dimension
 

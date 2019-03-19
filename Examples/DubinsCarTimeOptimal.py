@@ -58,28 +58,33 @@ def animateTrajectory(trajectories):
 if __name__ == '__main__':
     plt.close('all')
 
-    bezopt = BezOptimization(numVeh=1,
+    bezopt = BezOptimization(numVeh=3,
                              dimension=2,
                              degree=10,
                              minimizeGoal='TimeOpt',
                              maxSep=1,
                              maxSpeed=5,
                              maxAngRate=1,
-                             initPoints=(3, 0),
-                             finalPoints=(7, 10),
-                             initSpeeds=1,
-                             finalSpeeds=1,
-                             initAngs=np.pi/2,
-                             finalAngs=np.pi/2,
+                             initPoints=[(3, 0), (5, 0), (2, 3)],
+                             finalPoints=[(7, 10), (0, 5), (8, 6)],
+                             initSpeeds=[1]*3,
+                             finalSpeeds=[1]*3,
+                             initAngs=[np.pi/2]*3,
+                             finalAngs=[np.pi/2]*3,
                              pointObstacles=[[3, 2], [6, 7]]
                              )
 
-    xGuess = bezopt.generateGuess()
+    xGuess = bezopt.generateGuess(std=3)
     ineqCons = [{'type': 'ineq', 'fun': bezopt.temporalSeparationConstraints},
                 {'type': 'ineq', 'fun': bezopt.maxSpeedConstraints},
                 {'type': 'ineq', 'fun': bezopt.maxAngularRateConstraints}]
 
+    temp = bez.Bezier(bezopt.reshapeVector(xGuess))
+    temp.elev(10)
+    _ = temp*temp
+
     startTime = time.time()
+    print('starting')
     results = sop.minimize(
                 bezopt.objectiveFunction,
                 x0=xGuess,
@@ -129,4 +134,4 @@ if __name__ == '__main__':
     plt.xlabel('X Position', fontsize=20)
     plt.ylabel('Y Position', fontsize=20)
 
-#    animateTrajectory(curves)
+    animateTrajectory(curves)
