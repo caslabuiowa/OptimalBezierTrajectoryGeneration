@@ -75,7 +75,7 @@ def generate3DGuess(initPts, finalPts, deg):
 
 
 if __name__ == '__main__':
-    plt.close('all')
+#    plt.close('all')
 
     img = CAS_IMG
     numVeh, initPts, finalPts = generatePointsFromImage(img)
@@ -89,7 +89,7 @@ if __name__ == '__main__':
                              finalPoints=finalPts,
                              )
 
-    xGuess = generate3DGuess(initPts, finalPts, bezopt.model['deg'])
+#    xGuess = generate3DGuess(initPts, finalPts, bezopt.model['deg'])
 
     ineqCons = [{'type': 'ineq', 'fun': bezopt.temporalSeparationConstraints}]
 
