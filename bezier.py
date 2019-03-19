@@ -12,6 +12,7 @@ Vehicle Missions" written by Calvin Kielas-Jensen and Venanzio Cichella.
 
 from collections import defaultdict
 
+from gjk.gjk import gjk
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import numba
@@ -47,7 +48,7 @@ class BezierParams:
             self._tau = np.linspace(0, self._tf, 1001)
 
         if cpts is not None:
-            self._cpts = np.array(cpts, ndmin=2)
+            self._cpts = np.array(cpts, ndmin=2, dtype=float)
             self._dim = self._cpts.shape[0]
             self._deg = self._cpts.shape[1] - 1
         else:
@@ -697,6 +698,15 @@ class Bezier(BezierParams):
                                                         disp=1)
         return -maxVal[0] if status == 0 else None
 
+    def minDist(self, otherCurve):
+        """
+        """
+        if self.dim != 2 or otherCurve.dim != 2:
+            err = ('Both curves must be 2D only, not {} and {}.'
+                   ).format(self.dim, otherCurve.dim)
+            raise ValueError(err)
+        return _minDist(self, otherCurve)
+
     def normSquare(self):
         """Calculates the norm squared of the Bezier curve
 
@@ -1061,6 +1071,58 @@ def splitCurveMat(deg, z, coefMat=None):
         Qp[deg-i, :] = np.roll(row, deg-i)
 
     return Q, Qp
+
+
+def _minDist(c1, c2, cnt=0, alpha=np.inf, eps=1e-3):
+    """
+    Source: Computation of the minimum distance between two Bezier
+    curves/surfaces
+    """
+    x1 = c1.cpts[0, :]
+    y1 = c1.cpts[1, :]
+    x2 = c2.cpts[0, :]
+    y2 = c2.cpts[1, :]
+    poly1 = np.array(tuple(zip(x1, y1, [0]*x1.size)))
+    poly2 = np.array(tuple(zip(x2, y2, [0]*x1.size)))
+
+    cnt += 1
+    if cnt > 10:
+        return -1
+
+    ub = _upperbound(c1.cpts, c2.cpts)
+    lb = gjk(poly1, poly2, maxIter=10)
+
+    if ub <= alpha:
+        alpha = ub
+
+    if lb >= alpha*(1-eps):
+        return alpha
+    else:
+        c3, c4 = c1.split(0.5)
+        c5, c6 = c2.split(0.5)
+        alpha = min(alpha, _minDist(c3, c5, cnt=cnt, alpha=alpha))
+        alpha = min(alpha, _minDist(c3, c6, cnt=cnt, alpha=alpha))
+        alpha = min(alpha, _minDist(c4, c5, cnt=cnt, alpha=alpha))
+        alpha = min(alpha, _minDist(c4, c6, cnt=cnt, alpha=alpha))
+
+    return alpha
+
+
+@numba.njit
+def _upperbound(c1, c2):
+    distances = np.empty(4)
+
+    distances[0] = _norm(c1[:, 0] - c2[:, 0])
+    distances[1] = _norm(c1[:, 0] - c2[:, -1])
+    distances[2] = _norm(c1[:, -1] - c2[:, 0])
+    distances[3] = _norm(c1[:, -1] - c2[:, -1])
+
+    return distances.min()
+
+
+@numba.njit
+def _norm(x):
+    return np.sqrt(x[0]**2 + x[1]**2)
 
 
 # TODO
