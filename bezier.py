@@ -186,7 +186,7 @@ class Bezier(BezierParams):
         if self._curve is None:
             self._curve = np.zeros([self.dim, len(self.tau)])
             for i, pts in enumerate(self.cpts):
-                self._curve[i] = bezierCurve(pts, self.tau, tf=self.tf)
+                self._curve[i] = deCasteljauCurve(pts, self.tau)
 
         return self._curve
 
@@ -379,7 +379,7 @@ class Bezier(BezierParams):
         try:
             elevMat = Bezier.elevationMatrixCache[self.deg][R]
         except KeyError:
-            elevMat = elevBez(self.deg, R)
+            elevMat = elevMatrix(self.deg, R)
             Bezier.elevationMatrixCache[self.deg][R] = elevMat
 
         elevPts = []
@@ -405,7 +405,7 @@ class Bezier(BezierParams):
         try:
             Dm = Bezier.diffMatrixCache[self.deg][self.tf]
         except KeyError:
-            Dm = diffBez(self.deg, self.tf)
+            Dm = diffMatrix(self.deg, self.tf)
             Bezier.diffMatrixCache[self.deg][self.tf] = Dm
 
         cptsDot = []
@@ -726,7 +726,7 @@ class RationalBezier(BezierParams):
 
 
 @numba.njit
-def deCasteljauCurve(cpts, tau):
+def deCasteljauCurve(cpts, tau, tf=1.0):
     """Returns a Bezier curve using the de Casteljau algorithm
 
     Uses the de Casteljau algorithm to generate the Bezier curve defined by
@@ -740,11 +740,14 @@ def deCasteljauCurve(cpts, tau):
     :param tau: Values at which to evaluate Bezier curve. Must be within the
         range of [0,tf].
     :type tau: numpy.ndarray(dtype=numpy.float64)
+    :param tf: Final tau value for the 1D curve. Default is 1.0. Note that the
+        Bezier curve is defined on the range of [0, tf].
+    :type tf: float
     :return: Numpy array of length tau of the Bezier curve evaluated at each
         value of tau.
     :rtype: numpy.ndarray(dtype=numpy.float64)
     """
-    tau = tau/tau[-1]
+    tau = tau/tf
     curveLen = tau.size
     curve = np.empty(curveLen)
     curveIdx = 0
@@ -803,7 +806,6 @@ def deCasteljauSplit(cpts, tDiv, tf=1.0):
         newCpts = cptsTemp.copy()
 
     cptsLeft[-1] = cptsRight[-1] = newCpts[0]
-
 
     return cptsLeft, cptsRight
 
@@ -878,12 +880,15 @@ def buildBezMatrix(n):
     return bezMatrix
 
 
-@numba.jit(nopython=True)
-def diffBez(n, tf=1.0):
-    """
+@numba.njit
+def diffMatrix(n, tf=1.0):
+    """Generates the differentiation matrix to find the derivative
+
     Takes the derivative of the control points for a Bezier curve. The
     resulting control points can be used to construct a Bezier curve that is
     the derivative of the original.
+
+    Paper Reference: Property 3: Derivatives
 
     :param n: Degree of the Bezier curve
     :type n: int
@@ -902,7 +907,7 @@ def diffBez(n, tf=1.0):
 
 
 @numba.jit
-def elevBez(N, R=1):
+def elevMatrix(N, R=1):
     """Creates an elevation matrix for a Bezier curve.
 
     Creates a matrix to elevate a Bezier curve of degree N to degree N+R.
@@ -918,8 +923,9 @@ def elevBez(N, R=1):
     """
     T = np.zeros((N+1, N+R+1))
     for i in range(N+R+1):
+        den = binom(N+R, i)
         for j in range(N+1):
-            T[j, i] = binom(N, j) * binom(R, i-j) / binom(N+R, i)
+            T[j, i] = binom(N, j) * binom(R, i-j) / den
 
     return T
 
