@@ -7,6 +7,7 @@ Created on Tue Mar 19 10:11:19 2019
 """
 
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 import numpy as np
 import scipy.optimize as sop
 import time
@@ -74,6 +75,53 @@ def generate3DGuess(initPts, finalPts, deg):
     return lines.reshape((1, -1)).squeeze()
 
 
+def animate3DTrajectory(trajectories):
+    """Animates the trajectories
+
+    """
+    global ani
+
+    curveLen = len(trajectories[0].curve[0])
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    [ax.plot(traj.curve[0],
+             traj.curve[1],
+             traj.curve[2], '-', lw=3) for traj in trajectories]
+    lines = [ax.plot([],
+                     [],
+                     [], 'o', markersize=20)[0] for traj in trajectories]
+
+    def init():
+        for line in lines:
+            line.set_data([], [])
+            line.set_3d_properties([])
+        return lines
+
+    def animate(frame):
+        for i, line in enumerate(lines):
+            traj = trajectories[i]
+            try:
+                line.set_data(traj.curve[0][frame],
+                              traj.curve[1][frame])
+                line.set_3d_properties(traj.curve[2][frame])
+            except IndexError:
+                line.set_data(traj.curve[0][curveLen-frame-1],
+                              traj.curve[1][curveLen-frame-1])
+                line.set_3d_properties(traj.curve[2][curveLen-frame-1])
+        return lines
+
+    plt.axis('off')
+    ani = animation.FuncAnimation(fig,
+                                  animate,
+                                  len(trajectories[0].curve[0])*2,
+                                  init_func=init,
+                                  interval=5,
+                                  blit=True,
+                                  repeat=True)
+
+    plt.show()
+
+
 if __name__ == '__main__':
 #    plt.close('all')
 
@@ -89,7 +137,7 @@ if __name__ == '__main__':
                              finalPoints=finalPts,
                              )
 
-#    xGuess = generate3DGuess(initPts, finalPts, bezopt.model['deg'])
+    xGuess = generate3DGuess(initPts, finalPts, bezopt.model['deg'])
 
     ineqCons = [{'type': 'ineq', 'fun': bezopt.temporalSeparationConstraints}]
 
@@ -99,7 +147,7 @@ if __name__ == '__main__':
                 x0=xGuess,
                 method='SLSQP',
                 constraints=ineqCons,
-                options={'maxiter': 250,
+                options={'maxiter': 100,
                          'disp': True,
                          'iprint': 2}
                 )
@@ -126,7 +174,4 @@ if __name__ == '__main__':
                  [curve.cpts[2, -1]],
                  'k.', markersize=50)
 
-
-
-
-
+    animate3DTrajectory(curves)
