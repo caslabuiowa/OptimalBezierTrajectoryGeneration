@@ -1,16 +1,16 @@
 # BezierTrajectory
 
-The purpose of this repository is to build a library that can be used to generate optimal trajectories for multiple vehicles using Bezier curves.
+The purpose of this repository is to build a library that can be used to generate optimal trajectories, states and control inputs for autonomous vehicles using Bernstein polynomials.
 
-This project has three main parts: Bezier curve library, optimal generation, and displaying the results.
+This project has three main parts: Bezier curve library, Optimal control solver, and results plotting.
 
 ## Bezier Curve Library
 
-Bezier curves are parametric curves which use Bernstein polynomials as a basis. They have many useful properties which can be found at this website (https://pomax.github.io/bezierinfo/) and this paper (Farouki, The Bernstein polynomial basis: a centennial retrospective). The Bezier curve library is used to leverage the power of these curves by performing actions such as taking the derivative, increasing the order, and finding the norm squared of curves.
+Bezier curves are parametric curves which use Bernstein polynomials as a polynomial basis. They possess many useful properties which can exploited for motion planning [1]. The Bezier Curve Library implements such properties together with computationally efficient algorithms to compute the max/min of a Bezier curve, the distance between Bezier curves, etc.
 
-## Optimal Generation
+## Optimal Control solver
 
-By applying a desired cost function and constraints, the optimal trajectories for vehicles can be computed. The optimizer being used is the SciPy function minimize. This function is very similar to MATLAB's fmincon. The specific algorithm being used is "SLSQP".
+By applying a desired cost function and constraints, the optimal trajectories for vehicles can be computed. The optimizer being used is the SciPy function minimize. The specific algorithm being used is "SLSQP".
 
 ## Displaying Results
 
@@ -19,3 +19,6 @@ Once the optimal trajectories have been generated, the results are displayed to 
 ## Important Notes
 
 Due to a bug in previous version of the Scipy package, it is important that you use version 1.2.0 or higher. In earlier versions, the minimizing routine would return successfully even if the constraints to the problem were not met.
+
+
+[1] Farouki, Rida T. "The Bernstein polynomial basis: A centennial retrospective." Computer Aided Geometric Design 29.6 (2012): 379-419.
