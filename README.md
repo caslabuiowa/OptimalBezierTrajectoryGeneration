@@ -27,5 +27,7 @@ This research is funded by ONR.
 ## References
 
 [1] Farouki, Rida T. "The Bernstein polynomial basis: A centennial retrospective." Computer Aided Geometric Design 29.6 (2012): 379-419.
+
 [2] Venanzio Cichella, Isaac Kaminer, Claire Walton, Naira Hovakimyan, and Antonio Pascoal. "Bernstein approximation of optimal control problems." arXiv preprint arXiv:1812.06132 (2018).
+
 [3] Venanzio Cichella, Isaac Kaminer, Claire Walton, and Naira Hovakimyan. "Optimal motion planning for differentially flat systems using Bernstein approximation." IEEE Control Systems Letters 2, no. 1 (2018): 181-186.
