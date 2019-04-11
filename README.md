@@ -20,10 +20,12 @@ Once the optimal trajectories have been generated, the results are displayed to 
 
 Due to a bug in previous version of the Scipy package, it is important that you use version 1.2.0 or higher. In earlier versions, the minimizing routine would return successfully even if the constraints to the problem were not met.
 
-## Acknowledgement
+## Acknowledgements
 
 This research is funded by ONR.
 
 ## References
 
 [1] Farouki, Rida T. "The Bernstein polynomial basis: A centennial retrospective." Computer Aided Geometric Design 29.6 (2012): 379-419.
+[2] Venanzio Cichella, Isaac Kaminer, Claire Walton, Naira Hovakimyan, and Antonio Pascoal. "Bernstein approximation of optimal control problems." arXiv preprint arXiv:1812.06132 (2018).
+[3] Venanzio Cichella, Isaac Kaminer, Claire Walton, and Naira Hovakimyan. "Optimal motion planning for differentially flat systems using Bernstein approximation." IEEE Control Systems Letters 2, no. 1 (2018): 181-186.
