@@ -24,5 +24,6 @@ Due to a bug in previous version of the Scipy package, it is important that you 
 
 This research is funded by ONR.
 
+## References
 
 [1] Farouki, Rida T. "The Bernstein polynomial basis: A centennial retrospective." Computer Aided Geometric Design 29.6 (2012): 379-419.
