@@ -8,6 +8,7 @@ Created on Tue Mar 19 06:16:46 2019
 
 import matplotlib.pyplot as plt
 import numba
+from numba import njit, jit
 import numpy as np
 
 import bezier as bez
@@ -457,7 +458,7 @@ def _maxAngularRateConstraints(y, nVeh, dim, tf, maxAngRate):
     return (maxAngRate**2 - angularRateCpts).squeeze()
 
 
-@numba.njit
+@njit(cache=True)
 def _euclideanObjective(y, nVeh, dim):
     """Sums the Euclidean distance between control points.
 
@@ -506,6 +507,7 @@ def _minAccelObjective(y, nVeh, dim, tf):
     return summation
 
 
+@njit(cache=True)
 def _minJerkObjective(y, nVeh, dim, tf):
     """
     """
@@ -525,6 +527,7 @@ def _minJerkObjective(y, nVeh, dim, tf):
     return summation
 
 
+@jit(cache=True)
 def _angularRate(bezTraj):
     """
     Finds the angular rate of the 2D Bezier Curve.
@@ -559,6 +562,7 @@ def _angularRate(bezTraj):
     return bez.RationalBezier(cpts, weights)
 
 
+#@jit(cache=True)
 def _angularRateSqr(bezTraj):
     """
     Finds the squared angular rate of the 2D Bezier Curve.

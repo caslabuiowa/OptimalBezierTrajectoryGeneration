@@ -15,7 +15,8 @@ from collections import defaultdict
 from gjk.gjk import gjk
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-import numba
+#import numba
+from numba import njit, jit
 import numpy as np
 import scipy.optimize
 from scipy.special import binom
@@ -736,7 +737,7 @@ class RationalBezier(BezierParams):
         self._weights = np.array(weights, ndmin=2)
 
 
-@numba.njit
+@njit(cache=True)
 def deCasteljauCurve(cpts, tau, tf=1.0):
     """Returns a Bezier curve using the de Casteljau algorithm
 
@@ -776,7 +777,7 @@ def deCasteljauCurve(cpts, tau, tf=1.0):
     return curve
 
 
-@numba.njit
+@njit(cache=True)
 def deCasteljauSplit(cpts, tDiv, tf=1.0):
     """Uses the de Casteljau algorithm to split the curve at tDiv
 
@@ -859,7 +860,7 @@ def bezierCurve(cpts, tau, tf=1.0):
     return curve
 
 
-@numba.jit
+@jit(cache=True)
 def buildBezMatrix(n):
     """Builds a matrix of coefficients of the power basis to a Bernstein
     polynomial.
@@ -891,7 +892,7 @@ def buildBezMatrix(n):
     return bezMatrix
 
 
-@numba.njit
+@njit(cache=True)
 def diffMatrix(n, tf=1.0):
     """Generates the differentiation matrix to find the derivative
 
@@ -917,7 +918,7 @@ def diffMatrix(n, tf=1.0):
     return Dm
 
 
-@numba.jit
+@jit(cache=True)
 def elevMatrix(N, R=1):
     """Creates an elevation matrix for a Bezier curve.
 
@@ -941,7 +942,7 @@ def elevMatrix(N, R=1):
     return T
 
 
-@numba.jit
+@jit(cache=True)
 def prodMatrix(N):
     """Produces a product matrix for obtaining the norm of a Bezier curve
 
@@ -973,7 +974,7 @@ def prodMatrix(N):
 # TODO:
 #    Change this function name to prodM.
 #    Clean up and slightly change _normSquare to accommodate this change
-@numba.jit
+@jit(cache=True)
 def bezProductCoefficients(m, n=None):
     """Produces a product matrix for obtaining the product of two Bezier curves
 
@@ -1002,7 +1003,7 @@ def bezProductCoefficients(m, n=None):
     return coefMat
 
 
-@numba.jit
+@jit(cache=True)
 def multiplyBezCurves(multiplier, multiplicand, coefMat=None):
     """Multiplies two Bezier curves together
 
@@ -1040,7 +1041,7 @@ def multiplyBezCurves(multiplier, multiplicand, coefMat=None):
     return np.dot(newMat, coefMat)
 
 
-@numba.jit
+@jit(cache=True)
 def splitCurveMat(deg, z, coefMat=None):
     """Creates matrices Q and Qp that are used to compute control points for a
         split curve.
@@ -1109,7 +1110,7 @@ def _minDist(c1, c2, cnt=0, alpha=np.inf, eps=1e-3):
     return alpha
 
 
-@numba.njit
+@njit(cache=True)
 def _upperbound(c1, c2):
     distances = np.empty(4)
 
@@ -1121,7 +1122,7 @@ def _upperbound(c1, c2):
     return distances.min()
 
 
-@numba.njit
+@njit(cache=True)
 def _norm(x):
     return np.sqrt(x[0]**2 + x[1]**2)
 

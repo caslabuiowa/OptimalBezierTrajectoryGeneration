@@ -48,7 +48,7 @@ def animateTrajectory(trajectories):
                                   animate,
                                   len(trajectories[0].curve[0])*2,
                                   init_func=init,
-                                  interval=50,
+                                  interval=10,
                                   blit=True,
                                   repeat=True)
 
@@ -58,30 +58,34 @@ def animateTrajectory(trajectories):
 if __name__ == '__main__':
     plt.close('all')
 
-    bezopt = BezOptimization(numVeh=3,
-                             dimension=2,
-                             degree=10,
+    numVeh = 1
+    dim = 2
+    deg = 8
+    bezopt = BezOptimization(numVeh=numVeh,
+                             dimension=dim,
+                             degree=deg,
                              minimizeGoal='TimeOpt',
                              maxSep=1,
                              maxSpeed=5,
                              maxAngRate=1,
-                             initPoints=[(3, 0), (5, 0), (2, 3)],
-                             finalPoints=[(7, 10), (0, 5), (8, 6)],
-                             initSpeeds=[1]*3,
-                             finalSpeeds=[1]*3,
-                             initAngs=[np.pi/2]*3,
-                             finalAngs=[np.pi/2]*3,
+                             initPoints=[(3, 0)],
+                             finalPoints=[(7, 10)],
+                             initSpeeds=[1]*numVeh,
+                             finalSpeeds=[1]*numVeh,
+                             initAngs=[np.pi/2]*numVeh,
+                             finalAngs=[np.pi/2]*numVeh,
                              pointObstacles=[[3, 2], [6, 7]]
                              )
 
-    xGuess = bezopt.generateGuess(std=3)
+    xGuess = bezopt.generateGuess(std=0)
     ineqCons = [{'type': 'ineq', 'fun': bezopt.temporalSeparationConstraints},
                 {'type': 'ineq', 'fun': bezopt.maxSpeedConstraints},
-                {'type': 'ineq', 'fun': bezopt.maxAngularRateConstraints}]
+                {'type': 'ineq', 'fun': bezopt.maxAngularRateConstraints},
+                {'type': 'ineq', 'fun': lambda x: x[-1]}]
 
-    temp = bez.Bezier(bezopt.reshapeVector(xGuess))
-    temp.elev(10)
-    _ = temp*temp
+    _ = bez.Bezier(bezopt.reshapeVector(xGuess))
+    _.elev(10)
+    _ = _*_
 
     startTime = time.time()
     print('starting')
@@ -95,6 +99,21 @@ if __name__ == '__main__':
                          'iprint': 2}
                 )
     endTime = time.time()
+
+    while not results.success:
+        xGuess = bezopt.generateGuess(std=1)
+        startTime = time.time()
+        print('starting again')
+        results = sop.minimize(
+                    bezopt.objectiveFunction,
+                    x0=xGuess,
+                    method='SLSQP',
+                    constraints=ineqCons,
+                    options={'maxiter': 250,
+                             'disp': True,
+                             'iprint': 2}
+                    )
+        endTime = time.time()
 
     print('---')
     print('Computation Time: {}'.format(endTime - startTime))
