@@ -28,7 +28,7 @@ def gjk(polygon1, polygon2, method='nearest', *args, **kwargs):
     return algo(polygon1, polygon2, *args, **kwargs)
 
 
-@njit
+@njit(cache=True)
 def gjkNearest(polygon1, polygon2, maxIter=10):
     """
     Finds the shortest distance between two polygons using the GJK algorithm.
@@ -85,7 +85,7 @@ def gjkCollision(polygon1, polygon2):
     raise NotImplementedError(errorMsg)
 
 
-@njit
+@njit(cache=True)
 def support(shape, direction):
     """
     Returns the point in shape that is furthest in the desired direction.
@@ -115,7 +115,7 @@ def support(shape, direction):
     return supportPoint
 
 
-@njit
+@njit(cache=True)
 def closestPointToOrigin2(a, b):
     """
     Finds the closest point to the origin on the line AB.
@@ -138,7 +138,7 @@ def closestPointToOrigin2(a, b):
     return closestPoint, distance
 
 
-@njit
+@njit(cache=True)
 def closestPointToOrigin(a, b):
     """
     Finds the closest point to the origin on the line AB.
@@ -172,7 +172,7 @@ def closestPointToOrigin(a, b):
     return closestPt, np.sqrt(dot(closestPt, closestPt))
 
 
-@njit
+@njit(cache=True)
 def dot(a, b):
     """
     Fast implementation of the dot product.
@@ -195,7 +195,7 @@ def dot(a, b):
     return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]
 
 
-@njit
+@njit(cache=True)
 def tripleProduct(a, b, c):
     """
     Fast implementation of the vector triple product.
@@ -248,6 +248,6 @@ if __name__ == "__main__":
     print(retVal)
 
     poly3 = np.random.random((10, 3))
-    poly4 = np.random.random((10, 3))
+    poly4 = np.random.random((10, 3))+3
 
     print(gjk(poly3, poly4))

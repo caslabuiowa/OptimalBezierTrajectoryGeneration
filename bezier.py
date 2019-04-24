@@ -12,14 +12,13 @@ Vehicle Missions" written by Calvin Kielas-Jensen and Venanzio Cichella.
 
 from collections import defaultdict
 
-from gjk.gjk import gjk
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-#import numba
 from numba import njit, jit
 import numpy as np
-import scipy.optimize
 from scipy.special import binom
+
+from gjk.gjk import gjk
 
 
 #TODO:
@@ -54,11 +53,19 @@ class BezierParams:
         self._tf = float(tf)
         self._curve = None
 
-        if tau is None:
-            self._tau = np.linspace(0, self._tf, 1001)
+#        if tau is None:
+#            self._tau = np.linspace(0, self._tf, 1001)
 
         if cpts is not None:
-            self._cpts = np.array(cpts, ndmin=2, dtype=float)
+            # Checking to see if the cpts are in the desired format. If they
+            # are, don't call np.array since it causes a bottleneck in certain
+            # iterative procedures.
+            if (isinstance(cpts, np.ndarray) and
+                    cpts.dtype == 'float64' and
+                    cpts.ndim == 2):
+                self._cpts = cpts
+            else:
+                self._cpts = np.array(cpts, ndmin=2, dtype=float)
             self._dim = self._cpts.shape[0]
             self._deg = self._cpts.shape[1] - 1
         else:
@@ -73,7 +80,12 @@ class BezierParams:
     def cpts(self, value):
         self._curve = None
 
-        newCpts = np.array(value, ndmin=2)
+        if (isinstance(value, np.ndarray) and
+                value.ndim == 2 and
+                value.dtype == 'float64'):
+            newCpts = value
+        else:
+            newCpts = np.array(value, ndmin=2, dtype=float)
 
         self._dim = newCpts.shape[0]
         self._deg = newCpts.shape[1] - 1
@@ -108,7 +120,7 @@ class BezierParams:
     def tau(self):
         if self._tau is None:
             self._tau = np.linspace(0, self._tf, 1001)
-        else:
+        elif not isinstance(self._tau, np.ndarray):
             self._tau = np.array(self._tau)
         return self._tau
 
@@ -207,7 +219,8 @@ class Bezier(BezierParams):
         :return: Deep copy of Bezier object
         :rtype: Bezier
         """
-        return Bezier(self.cpts, self.tau, self.tf)
+#        return Bezier(self.cpts, self.tau, self.tf)
+        return Bezier(self.cpts, None, self.tf)
 
     def plot(self, axisHandle=None, showCpts=True, **kwargs):
         """Plots the Bezier curve in 1D or 2D
@@ -724,8 +737,14 @@ class Bezier(BezierParams):
             prodM = prodMatrix(self.deg).T
             Bezier.productMatrixCache[self.deg][self.deg] = prodM
 
-        return Bezier(_normSquare(self.cpts, 1, self.dim, prodM.T),
-                      tau=self.tau, tf=self.tf)
+        normCpts = _normSquare(self.cpts, 1, self.dim, prodM.T)
+
+        newCurve = self.copy()
+        newCurve.cpts = normCpts
+
+        return newCurve
+#        return Bezier(_normSquare(self.cpts, 1, self.dim, prodM.T),
+#                      tau=self.tau, tf=self.tf)
 
 
 class RationalBezier(BezierParams):
@@ -1173,6 +1192,7 @@ def _norm(x):
 #    return res
 
 
+@njit(cache=True)
 def _normSquare(x, Nveh, Ndim, prodM):
     """Compute the control points of the square of the norm of a vector
 
@@ -1184,16 +1204,17 @@ def _normSquare(x, Nveh, Ndim, prodM):
     Code ported over from Venanzio Cichella's MATLAB norm_square function.
     NOTE: This only works on 1D or 2D matricies. It will fail for 3 or more.
     """
-    x = np.array(x)
-    if x.ndim == 1:
-        x = x[None]
+#    x = np.array(x)
+#    if x.ndim == 1:
+#        x = x[None]
 
     m, N = x.shape
 
     xsquare = np.zeros((m, prodM.shape[0]))
 
     for i in range(m):
-        xaug = np.dot(x[i, None].T, x[i, None])
+#        xaug = np.dot(x[i, None].T, x[i, None])
+        xaug = np.dot(x.T, x)
         xnew = xaug.reshape((N**2, 1))
         xsquare[i, :] = np.dot(prodM, xnew).T[0]
 
