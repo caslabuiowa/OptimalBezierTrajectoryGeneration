@@ -219,8 +219,8 @@ class Bezier(BezierParams):
         :return: Deep copy of Bezier object
         :rtype: Bezier
         """
-#        return Bezier(self.cpts, self.tau, self.tf)
-        return Bezier(self.cpts, None, self.tf)
+        return Bezier(self.cpts, self.tau, self.tf)
+#        return Bezier(self.cpts, None, self.tf)
 
     def plot(self, axisHandle=None, showCpts=True, **kwargs):
         """Plots the Bezier curve in 1D or 2D

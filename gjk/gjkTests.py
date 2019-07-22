@@ -9,36 +9,68 @@ This test file uses examples found at:
 @author: ckielasjensen
 """
 
+from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import matplotlib.pyplot as plt
 import numpy as np
 
-import gjk
+from gjk import gjk
 
-poly1 = np.array([
-        (4, 11, 0),
-        (4, 5, 0),
-        (9, 9, 0)
-        ])
 
-poly2 = np.array([
-        (8, 6, 0),
-        (10, 2, 0),
-        (13, 1, 0),
-        (15, 6, 0)
-        ])
+if __name__ == '__main__':
+    plt.close('all')
 
-retVal = gjk.gjk(poly1, poly2)
+    #poly1 = np.array([
+    #        (4, 11, 0),
+    #        (4, 5, 0),
+    #        (9, 9, 0)
+    #        ])
+    #
+    #poly2 = np.array([
+    #        (8, 6, 0),
+    #        (10, 2, 0),
+    #        (13, 1, 0),
+    #        (15, 6, 0)
+    #        ])
 
-fig, ax = plt.subplots()
+    poly1 = np.array([
+            (1, 0, -2),
+            (0, 4, -3),
+            (0, 0, 0)
+            ])
 
-polyFig1 = plt.Polygon(poly1[:, :2], fill=False)
-polyFig2 = plt.Polygon(poly2[:, :2], fill=False)
+    poly2 = np.array([
+            (3, 8, 1),
+            (5, -4, 1),
+            (0.2, 0, 5)
+            ])
 
-ax.add_artist(polyFig1)
-ax.add_artist(polyFig2)
-xvals = np.concatenate((poly1[:, 0], poly2[:, 0]))
-yvals = np.concatenate((poly1[:, 1], poly2[:, 1]))
-ax.set_xlim((min(xvals), max(xvals)))
-ax.set_ylim((min(yvals), max(yvals)))
+    retVal = gjk.gjk(poly1, poly2)
 
-print(f'Minimum Distance: {retVal}')
+    #fig, ax = plt.subplots()
+    #
+    #polyFig1 = plt.Polygon(poly1[:, :2], fill=False)
+    #polyFig2 = plt.Polygon(poly2[:, :2], fill=False)
+    #
+    #ax.add_artist(polyFig1)
+    #ax.add_artist(polyFig2)
+    #xvals = np.concatenate((poly1[:, 0], poly2[:, 0]))
+    #yvals = np.concatenate((poly1[:, 1], poly2[:, 1]))
+    #ax.set_xlim((min(xvals), max(xvals)))
+    #ax.set_ylim((min(yvals), max(yvals)))
+
+    fig = plt.figure()
+    ax = Axes3D(fig)
+    ax.add_collection3d(Poly3DCollection([poly1.tolist()]))
+    ax.add_collection3d(Poly3DCollection([poly2.tolist()]))
+
+    ax.set_xlim([-10, 10])
+    ax.set_ylim([-10, 10])
+    ax.set_zlim([-10, 10])
+
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_zlabel('z')
+
+    print(f'Minimum Distance: {retVal}')
+    plt.show()
