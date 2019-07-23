@@ -14,9 +14,11 @@ Created on Sun Nov 11 21:25:46 2018
 # NOTE: This library uses the numba library to significantly spead up certain
 #   operations.
 
-# from scipy.spatial import ConvexHull
-import numpy as np
 from numba import njit
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from scipy.spatial import ConvexHull
 
 
 def gjk(polygon1, polygon2, method='nearest', *args, **kwargs):
@@ -298,37 +300,78 @@ def minimumDistance(poly1, poly2, simplex, direction):
 
         # Origin closest to A, C or AC
         if np.cross(ABC, AC).dot(A0) > 0:
-#            print('AC')
-            closestPt, distance = closestPointToLine(simplex['A'],
-                                                     simplex['C'])
+            print('AC')
+#            closestPt, distance = closestPointToLine(simplex['A'],
+#                                                     simplex['C'])
+            t, distance = weightedOriginToLine(simplex['A'],
+                                               simplex['C'])
+            poly1pt = (1-t)*simplex['Apts'][0] + t*simplex['Cpts'][0]
+            poly2pt = (1-t)*simplex['Apts'][1] + t*simplex['Cpts'][1]
 
         # Origin closest to A, B, or AB
         elif np.cross(AB, ABC).dot(A0) > 0:
-#            print('AB')
-            closestPt, distance = closestPointToLine(simplex['A'],
-                                                     simplex['B'])
+            print('AB')
+#            closestPt, distance = closestPointToLine(simplex['A'],
+#                                                     simplex['B'])
+            t, distance = weightedOriginToLine(simplex['A'],
+                                               simplex['B'])
+            poly1pt = (1-t)*simplex['Apts'][0] + t*simplex['Bpts'][0]
+            poly2pt = (1-t)*simplex['Apts'][1] + t*simplex['Bpts'][1]
 
         # Origin closest to plane ABC
         else:
-#            print('Plane')
-            closestPt, distance = closestPointToPlane(simplex['A'],
-                                                      simplex['B'],
-                                                      simplex['C'])
+            print('Plane')
+#            print(f'Plane Simplex: {repr(simplex)}')
+#            closestPt, distance = closestPointToPlane(simplex['A'],
+#                                                      simplex['B'],
+#                                                      simplex['C'])
+#            poly1pt = -9999
+#            poly2pt = -9999
+
+            print(simplex)
+            baryTriple, distance = weightedOriginToPlane(simplex['A'],
+                                                         simplex['B'],
+                                                         simplex['C'])
+
+            A = simplex['A']
+            B = simplex['B']
+            C = simplex['C']
+            A1 = simplex['Apts'][0]
+            B1 = simplex['Bpts'][0]
+            C1 = simplex['Cpts'][0]
+            A2 = simplex['Apts'][1]
+            B2 = simplex['Bpts'][1]
+            C2 = simplex['Cpts'][1]
+
+            poly1pt = (baryTriple[0]*(A+A2) +
+                       baryTriple[1]*(B+B2) +
+                       baryTriple[2]*(C+C2))
+
+            poly2pt = (baryTriple[0]*(A1-A) +
+                       baryTriple[1]*(B1-B) +
+                       baryTriple[2]*(C1-C))
+
     # 2 point simplex
     elif 'B' in simplex.keys():
-        closestPt, distance = closestPointToLine(simplex['A'],
-                                                 simplex['B'])
+#        closestPt, distance = closestPointToLine(simplex['A'],
+#                                                 simplex['B'])
+        t, distance = weightedOriginToLine(simplex['A'],
+                                           simplex['B'])
+        poly1pt = (1-t)*simplex['Apts'][0] + t*simplex['Bpts'][0]
+        poly2pt = (1-t)*simplex['Apts'][1] + t*simplex['Bpts'][1]
 
     # 1 point simplex
     elif 'A' in simplex.keys():
-        closestPt = simplex['A']
+#        closestPt = simplex['A']
         distance = np.linalg.norm(simplex['A'])
+        poly1pt = simplex['Apts'][0]
+        poly2pt = simplex['Apts'][1]
 
     else:
         raise ValueError('Simplex should at least be a point to check '
                          'for the minimum distance.')
 
-    return closestPt, distance
+    return (poly1pt, poly2pt), distance
 
 
 @njit(cache=True)
@@ -363,6 +406,89 @@ def closestPointToLine(a, b):
         closestPt = a.astype(np.float64)
 
     return closestPt, np.sqrt(dot(closestPt, closestPt))
+
+
+@njit(cache=True)
+def weightedOriginToLine(A, B):
+    """Finds the closest point to the origin on the line AB and its distance.
+    This will print a warning if A and B are equal.
+
+    INPUTS:
+        A (np.array) - 1x3 array of x, y, and z vector coordinates. For the 2D
+        case, simply set z to zero.
+
+        B (np.array) - See a. Must be different from b otherwise it will result
+        in a divide by zero exception.
+
+    RETURNS:
+        t (float) - Weight corresponding to where on the line the closest point
+        to the origin lies. If t=0, the closest point to the origin is A, if
+        t=1, the closest point to the origin is B.
+
+        dist (float) - Distance between the closest point to the origin and the
+        origin
+
+    SOURCE:
+        https://math.stackexchange.com/questions/2193720/find-a-point-on-a-
+        line-segment-which-is-the-closest-to-other-point-not-on-the-li
+    """
+    if (A == B).all():
+        print('[!] Warning, points are identical.')
+        return 0, np.sqrt(dot(A, A))
+
+    v = B - A
+    u = A
+    t = -dot(v, u) / dot(v, v)
+
+    if t > 1:
+        t = 1
+    elif t < 0:
+        t = 0
+
+    closestPt = (1-t)*A + t*B
+    dist = np.sqrt(dot(closestPt, closestPt))
+
+    return t, dist
+
+
+def weightedOriginToPlane(A, B, C):
+    """
+    SOURCES:
+        * https://math.stackexchange.com/questions/100761/how-do-i-find-the-
+          projection-of-a-point-onto-a-plane
+        * https://math.stackexchange.com/questions/588871/minimum-distance-
+          between-point-and-face
+    """
+    N = np.cross(B-A, C-A)
+    n = N / np.linalg.norm(N)
+
+    a = n[0]
+    b = n[1]
+    c = n[2]
+
+    d = A[0]
+    e = A[1]
+    f = A[2]
+
+    # First, we find the closest point on the Minkowski difference
+    t = (a*d + b*e + c*f) / (a**2 + b**2 + c**2)
+    closestPt = t*n
+    dist = np.sqrt(dot(closestPt, closestPt))
+
+    # Then, we find the Barycentric triple so that we can project the point
+    # onto each shape.
+    PA = A - closestPt
+    PB = B - closestPt
+    PC = C - closestPt
+
+    areaABC2 = np.linalg.norm(N)
+    alpha = np.linalg.norm(np.cross(PB, PC)) / areaABC2
+    beta = np.linalg.norm(np.cross(PC, PA)) / areaABC2
+    gamma = 1 - alpha - beta
+
+    baryTriple = (alpha, beta, gamma)
+
+    return baryTriple, dist
 
 
 #@njit(cache=True)
@@ -474,6 +600,7 @@ def simplex3pt(poly1, poly2, simplex):
                 direction = np.cross(np.cross(AB, A0), AB)
                 # Keep points A and B, replace C
                 simplex['C'] = simplex['A']
+                simplex['Cpts'] = simplex['Apts']
 
             # Otherwise we are closest to point A
             else:
@@ -488,6 +615,7 @@ def simplex3pt(poly1, poly2, simplex):
             direction = np.cross(np.cross(AB, A0), AB)
             # Keep points A and B, replace C
             simplex['C'] = simplex['A']
+            simplex['Cpts'] = simplex['Apts']
 
         # Otherwise we are closest to point A
         else:
@@ -505,8 +633,11 @@ def simplex3pt(poly1, poly2, simplex):
             direction = ABC
 
             simplex['D'] = simplex['C']
+            simplex['Dpts'] = simplex['Cpts']
             simplex['C'] = simplex['B']
+            simplex['Cpts'] = simplex['Bpts']
             simplex['B'] = simplex['A']
+            simplex['Bpts'] = simplex['Apts']
 
         else:
             # If the origin is below the simplex, swap the points to make the
@@ -514,7 +645,9 @@ def simplex3pt(poly1, poly2, simplex):
             direction = -ABC
 
             simplex['D'] = simplex['B']
+            simplex['Dpts'] = simplex['Bpts']
             simplex['B'] = simplex['A']
+            simplex['Bpts'] = simplex['Apts']
 
     simplex['A'], simplex['Apts'] = supportPts(poly1, poly2, direction)
 
@@ -541,12 +674,16 @@ def simplex4pt(poly1, poly2, simplex):
 
     elif ACD.dot(A0) > 0:
         simplex['B'] = simplex['C']
+        simplex['Bpts'] = simplex['Cpts']
         simplex['C'] = simplex.pop('D')
+        simplex['Cpts'] = simplex.pop('Dpts')
         simplex, direction = simplex3pt(poly1, poly2, simplex)
 
     elif ADB.dot(A0) > 0:
         simplex['C'] = simplex['B']
+        simplex['Cpts'] = simplex['Bpts']
         simplex['B'] = simplex.pop('D')
+        simplex['Bpts'] = simplex.pop('Dpts')
         simplex, direction = simplex3pt(poly1, poly2, simplex)
 
     else:
@@ -608,10 +745,10 @@ if __name__ == "__main__":
             ])
 
     poly8 = np.array([
-            (-1, -1, -100),
-            (1, 1, -100),
-            (1, -1, -100),
-            (-1, 1, -100),
+            (-1, -1, -3),
+            (1, 1, -3),
+            (1, -1, -3),
+            (-1, 1, -3),
             (0, 0, -1)
             ])
 
@@ -717,6 +854,8 @@ if __name__ == "__main__":
 #    ax.set_zlabel('z')
 #    plt.show()
 
+    plt.close('all')
+
     verbose = False
     print(gjkNew(poly1, poly2, verbose=verbose))
     print(gjkNew(poly1, poly3, verbose=verbose))
@@ -724,3 +863,25 @@ if __name__ == "__main__":
     print(gjkNew(poly1, poly5, verbose=verbose))
     print(gjkNew(poly5, poly6, verbose=verbose))
     print(gjkNew(poly7, poly8, verbose=verbose))
+
+    polyTest = [poly5, poly6]
+
+    polyPts, dist = gjkNew(polyTest[0], polyTest[1])
+    polyPts = np.array(polyPts)
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+
+    for poly in polyTest:
+        pts = poly.copy()
+        hull = ConvexHull(pts, qhull_options='QJ')
+
+        ax.plot(pts.T[0], pts.T[1], pts.T[2], 'ko')
+
+        for s in hull.simplices:
+            s = np.append(s, s[0])
+            ax.plot(pts[s, 0], pts[s, 1], pts[s, 2], 'b-')
+
+    plt.plot(polyPts[:, 0], polyPts[:, 1], polyPts[:, 2], 'r*-')
+
+    plt.show()
