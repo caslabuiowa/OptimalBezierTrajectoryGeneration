@@ -734,11 +734,27 @@ class Bezier(BezierParams):
 #            err = ('Both curves must be 2D only, not {} and {}.'
 #                   ).format(self.dim, otherCurve.dim)
 #            raise ValueError(err)
-        if self.dim < 2 or self.dim > 3 or otherCurve.dim < 2 or otherCurve.dim > 3:
+        if (self.dim < 2 or self.dim > 3 or
+                otherCurve.dim < 2 or otherCurve.dim > 3):
             err = ('Both curves must be either 2D or 3D, not {}D and {}D.'
                    ).format(self.dim, otherCurve.dim)
             raise ValueError(err)
         return _minDist(self, otherCurve)
+
+    def minDist2Poly(self, poly):
+        """
+        """
+        return _minDist2Poly(self, poly)
+
+    def collCheck(self, otherCurve):
+        """
+        """
+        return _collCheckBez2Bez(self, otherCurve)
+
+    def collCheck2Poly(self, poly):
+        """
+        """
+        return _collCheckBez2Poly(self, poly)
 
     def normSquare(self):
         """Calculates the norm squared of the Bezier curve
@@ -1112,7 +1128,7 @@ def splitCurveMat(deg, z, coefMat=None):
     return Q, Qp
 
 
-def _minDist(c1, c2, cnt=0, alpha=np.inf, eps=1e-3,
+def _minDist(c1, c2, cnt=0, alpha=np.inf, eps=1e-9,
              t1_l=0, t1_h=1, t2_l=0, t2_h=1):
     """
     Source: Computation of the minimum distance between two Bezier
@@ -1182,7 +1198,7 @@ def _minDist(c1, c2, cnt=0, alpha=np.inf, eps=1e-3,
     else:
         t1 = 0.5
         t2 = 0.5
-        lb = 0
+        lb = eps
 
     t1len = t1_h - t1_l
     t2len = t2_h - t2_l
@@ -1237,6 +1253,92 @@ def _minDist(c1, c2, cnt=0, alpha=np.inf, eps=1e-3,
     return retval
 
 
+def _minDist2Poly(c1, poly2, cnt=0, alpha=np.inf, eps=1e-9, t1_l=0, t1_h=1):
+    """Similar to _minDist but finds the distance between a curve and a polygon
+    """
+    x1 = c1.cpts[0, :]
+    y1 = c1.cpts[1, :]
+
+    if c1.dim == 3:
+        z1 = c1.cpts[2, :]
+    else:
+        z1 = [0]*x1.size
+
+    poly1 = np.array(tuple(zip(x1, y1, z1)))
+    poly2 = poly2.astype(float)
+
+    cnt += 1
+    if cnt > 1000:
+        return (-1, -1, -1)
+
+    flag, info = gjkNew(poly1, poly2)
+    if flag > 0:
+        closest1 = info[0]
+        closest2 = info[1]
+        lb = info[2]
+
+        # Check to see if the closest point on the shape is a control point
+        p1idx = np.where((poly1 == closest1).all(axis=1))[0]
+        if p1idx.size > 0:
+            t1 = p1idx[0]/c1.deg
+
+        # If the closest point is not a control point, find t by weighting all
+        # the control points by their distance from the closest point
+        else:
+            eucDist1 = np.linalg.norm(closest1-c1.cpts.T, axis=1)
+            N = eucDist1.size
+            W = np.empty(N)
+            for i in range(N):
+                W[i] = 1 / (1 +
+                            (eucDist1[i]/eucDist1[:i]).sum() +
+                            (eucDist1[i]/eucDist1[i+1:]).sum())
+
+            t1 = (W*range(N)/N).sum()
+
+        # Upper bound check
+        ub, t1local = _upperboundPoly(c1.cpts, closest2)
+        if ub <= alpha:
+            alpha = ub
+            newT1 = (1-t1local)*t1_l + t1local*t1_h
+        else:
+            newT1 = -1
+
+    else:
+        t1 = 0.5
+        newT1 = -1
+        closest2 = -1
+        lb = eps
+        ub = np.inf
+
+    t1len = t1_h - t1_l
+
+    retval = (alpha, newT1, closest2)
+
+    if lb >= alpha*(1-eps):
+        return retval
+
+    else:
+        c3, c4 = c1.split(t1)
+
+        newAlpha, newT1, closest2 = _minDist2Poly(c3, poly2, cnt=cnt,
+                                                  alpha=retval[0],
+                                                  t1_l=t1_l,
+                                                  t1_h=t1_l+t1*t1len)
+
+        if newAlpha < retval[0]:
+            retval = (newAlpha, newT1, closest2)
+
+        newAlpha, newT1, closest2 = _minDist2Poly(c4, poly2, cnt=cnt,
+                                                  alpha=retval[0],
+                                                  t1_l=t1_l+t1*t1len,
+                                                  t1_h=t1_h)
+
+        if newAlpha < retval[0]:
+            retval = (newAlpha, newT1, closest2)
+
+    return retval
+
+
 @njit(cache=True)
 def _upperbound(c1, c2):
     """
@@ -1257,18 +1359,49 @@ def _upperbound(c1, c2):
     return distances.min(), t1, t2
 
 
+#@njit(cache=True)
+#def _upperboundPoly(c1, poly):
+#    """
+#    """
+#    distances = np.empty(2*poly.shape[0])
+#    tvals = np.array((0., 1.))
+#
+#    for i in range(poly.shape[0]):
+#        distances[2*i] = _norm(c1[:, 0] - poly[i])
+#        distances[2*i+1] = _norm(c1[:, -1] - poly[i])
+#
+#    t1 = tvals[distances.argmin() % 2]
+#
+#    return distances.min(), t1
+
+
+@njit(cache=True)
+def _upperboundPoly(c1, pt):
+    """
+    """
+    distances = np.empty(2)
+    tvals = np.array((0., 1.))
+
+    distances[0] = _norm(c1[:, 0] - pt)
+    distances[1] = _norm(c1[:, -1] - pt)
+
+    t1 = tvals[distances.argmin()]
+
+    return distances.min(), t1
+
+
 @njit(cache=True)
 def _norm(x):
     """
     """
-    summation = 0
+    summation = 0.
     for val in x:
         summation += val*val
 
     return np.sqrt(summation)
 
 
-def _collCheckBez2Bez(c1, c2, cnt=0, alpha=np.inf, eps=1e-3):
+def _collCheckBez2Bez(c1, c2, cnt=0, alpha=np.inf, eps=1e-9):
     """
     Source: Computation of the minimum distance between two Bezier
     curves/surfaces
@@ -1318,6 +1451,57 @@ def _collCheckBez2Bez(c1, c2, cnt=0, alpha=np.inf, eps=1e-3):
         alpha = min(alpha, _collCheckBez2Bez(c3, c6, cnt=cnt, alpha=alpha))
         alpha = min(alpha, _collCheckBez2Bez(c4, c5, cnt=cnt, alpha=alpha))
         alpha = min(alpha, _collCheckBez2Bez(c4, c6, cnt=cnt, alpha=alpha))
+
+    return alpha
+
+
+def _collCheckBez2Poly(c1, poly2, cnt=0, alpha=np.inf, eps=1e-9):
+    """
+    Source: Computation of the minimum distance between two Bezier
+    curves/surfaces
+    """
+    x1 = c1.cpts[0, :]
+    y1 = c1.cpts[1, :]
+
+    if c1.dim == 3:
+        z1 = c1.cpts[2, :]
+    else:
+        z1 = [0]*x1.size
+
+    poly1 = np.array(tuple(zip(x1, y1, z1)))
+
+    cnt += 1
+    if cnt > 1000:
+        return -1
+
+    flag, info = gjkNew(poly1, poly2)
+    if flag > 0:
+        return 1
+    else:
+        t1 = 0.5
+        lb = eps
+
+    ub = np.inf
+
+    flag1, info1 = gjkNew(poly2, np.atleast_2d(poly1[0]))
+    flag2, info2 = gjkNew(poly2, np.atleast_2d(poly1[-1]))
+
+    if flag1 > 0:
+        ub = info1[2]
+
+    if flag2 > 0 and info2[2] < ub:
+        ub = info2[2]
+
+    if ub <= alpha:
+        alpha = ub
+
+    if lb >= alpha*(1-eps):
+        return round(alpha, int(round(np.log(eps)/np.log(10))))
+
+    else:
+        c3, c4 = c1.split(t1)
+        alpha = min(alpha, _collCheckBez2Poly(c3, poly2, cnt=cnt, alpha=alpha))
+        alpha = min(alpha, _collCheckBez2Poly(c4, poly2, cnt=cnt, alpha=alpha))
 
     return alpha
 
@@ -1403,15 +1587,28 @@ def _normSquare(x, Nveh, Ndim, prodM):
     return np.dot(S, xsquare)
 
 
+def plotPoly(poly, ax):
+    from scipy.spatial import ConvexHull
+
+    pts = poly.copy()
+    hull = ConvexHull(pts, qhull_options='QJ')
+
+    ax.plot(pts.T[0], pts.T[1], pts.T[2], 'ko')
+
+    for s in hull.simplices:
+        s = np.append(s, s[0])
+        ax.plot(pts[s, 0], pts[s, 1], pts[s, 2], 'b-')
+
+
 if __name__ == '__main__':
-    COMPARE_DISC_DIST = True
+    COMPARE_DISC_DIST = False
     cpts1 = np.array([(0, 1, 2, 3, 4, 5),
                       (1, 2, 0, 0, 2, 1),
                       (0, 1, 2, 3, 4, 5)])
 
     cpts2 = np.array([(0, 1, 2, 3, 4, 5),
                       (3, 2, 0, 0, 2, 3),
-                      (5, 4, 3, 2, 1, 0)])# + 3
+                      (5, 4, 3, 2, 1, 0)])
 
     cpts3 = np.array([(0, 1, 2, 3, 4, 5),
                       (0, 1, 2, 3, 4, 5),
@@ -1421,15 +1618,41 @@ if __name__ == '__main__':
                       (0, 1, 2, 3, 4, 5),
                       (0, 0, 0, 0, 0, 0,)])
 
+    cpts4[1, :] -= 1
+
+    cpts5 = cpts1 + 3
+
+    poly1 = np.array([(1, 1, 3),
+                      (1, 1, 2),
+                      (1, 2, 1),
+                      (3, 1, 3),
+                      (1, 3, 1)])
+
+    poly2 = np.array([(1, 1, 3),
+                      (1, 1, 2),
+                      (1, 2, 1),
+                      (3, -1, 3),
+                      (1, 3, 1)])
+
     c1 = Bezier(cpts1, tau=np.linspace(0, 1, 1001))
     c2 = Bezier(cpts2, tau=np.linspace(0, 1, 1001))
     c3 = Bezier(cpts3)
     c4 = Bezier(cpts4)
+    c5 = Bezier(cpts5)
 
+    print('Checking for collisions, 1 means none, 0 means collision')
+    print('C1 and C2')
     print(_collCheckBez2Bez(c1, c2))
+    print('C3 and C4')
     print(_collCheckBez2Bez(c3, c4))
+    print('C1 and poly2')
+    print(_collCheckBez2Poly(c1, poly2))
+    print('C5 and poly1')
+    print(_collCheckBez2Poly(c5, poly1))
 
-
+    print('---')
+    print('Minimum distances')
+    print('C1 and C2')
     dist, t1, t2 = c1.minDist(c2)
     print(f'MinDist: {dist}, t1: {t1}, t2: {t2}')
     pt1 = c1(t1)
@@ -1462,5 +1685,14 @@ if __name__ == '__main__':
         plt.plot(np.array((discPt1[0], discPt2[0])).squeeze(),
                  np.array((discPt1[1], discPt2[1])).squeeze(),
                  np.array((discPt1[2], discPt2[2])).squeeze(), 'r--')
+
+    print('C1 and poly1')
+    shapeDist, t1, pt = _minDist2Poly(c1, poly1)
+    print(f'Shape Dist: {shapeDist}, t1: {t1}, pt: {pt}')
+    ax2 = c1.plot()
+    plotPoly(poly1, ax2)
+    plt.plot(np.array((c1(t1)[0], pt[0])),
+             np.array((c1(t1)[1], pt[1])),
+             np.array((c1(t1)[2], pt[2])))
 
     plt.show()
