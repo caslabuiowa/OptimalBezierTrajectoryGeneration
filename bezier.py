@@ -18,7 +18,8 @@ from numba import njit, jit
 import numpy as np
 from scipy.special import binom
 
-from gjk.gjk import gjk
+from gjk.gjk import gjkNew
+#from gjk import gjkNew
 
 
 #TODO:
@@ -168,6 +169,15 @@ class Bezier(BezierParams):
 
     def __repr__(self):
         return 'Bezier({}, {}, {})'.format(self.cpts, self.tau, self.tf)
+
+    def __call__(self, t):
+        """Calling the curve returns a single value at the passed in t value
+        """
+        pt = np.empty((self.dim, 1))
+        for i, pts in enumerate(self.cpts):
+            pt[i] = deCasteljauCurve(pts, np.array([t]), self.tf)
+
+        return pt
 
     @property
     def x(self):
@@ -469,16 +479,31 @@ class Bezier(BezierParams):
         :return: Tuple of curves. One before the split point and one after.
         :rtype: tuple(Bezier, Bezier)
         """
+        c1 = self.copy()
+        c2 = self.copy()
+
+#        if tDiv <= 0.0:
+#            c1.cpts = self.cpts[:, 0].copy()
+#            c2.cpts = self.cpts.copy()
+#            print(self.cpts)
+#            return c1, c2
+#
+#        elif tDiv >= 1.0:
+#            c1.cpts = self.cpts.copy()
+#            c2.cpts = self.cpts[:, -1].copy()
+#            return c1, c2
+
         cpts1 = []
         cpts2 = []
+
+        if np.isnan(tDiv):
+            print(f'[!] Warning, tDiv is {tDiv}, changing to 0.')
+            tDiv = 0
 
         for d in range(self.dim):
             left, right = deCasteljauSplit(self.cpts[d, :], tDiv, self.tf)
             cpts1.append(left)
-            cpts2.append(right)
-
-        c1 = self.copy()
-        c2 = self.copy()
+            cpts2.append(right[::-1])
 
         c1.cpts = cpts1
         c2.cpts = cpts2
@@ -716,8 +741,12 @@ class Bezier(BezierParams):
     def minDist(self, otherCurve):
         """
         """
-        if self.dim != 2 or otherCurve.dim != 2:
-            err = ('Both curves must be 2D only, not {} and {}.'
+#        if self.dim != 2 or otherCurve.dim != 2:
+#            err = ('Both curves must be 2D only, not {} and {}.'
+#                   ).format(self.dim, otherCurve.dim)
+#            raise ValueError(err)
+        if self.dim < 2 or self.dim > 3 or otherCurve.dim < 2 or otherCurve.dim > 3:
+            err = ('Both curves must be either 2D or 3D, not {}D and {}D.'
                    ).format(self.dim, otherCurve.dim)
             raise ValueError(err)
         return _minDist(self, otherCurve)
@@ -1094,7 +1123,8 @@ def splitCurveMat(deg, z, coefMat=None):
     return Q, Qp
 
 
-def _minDist(c1, c2, cnt=0, alpha=np.inf, eps=1e-3):
+def _minDist(c1, c2, cnt=0, alpha=np.inf, eps=1e-3,
+             t1_l=0, t1_h=1, t2_l=0, t2_h=1):
     """
     Source: Computation of the minimum distance between two Bezier
     curves/surfaces
@@ -1103,47 +1133,263 @@ def _minDist(c1, c2, cnt=0, alpha=np.inf, eps=1e-3):
     y1 = c1.cpts[1, :]
     x2 = c2.cpts[0, :]
     y2 = c2.cpts[1, :]
-    poly1 = np.array(tuple(zip(x1, y1, [0]*x1.size)))
-    poly2 = np.array(tuple(zip(x2, y2, [0]*x1.size)))
+
+    if c1.dim == 3:
+        z1 = c1.cpts[2, :]
+    else:
+        z1 = [0]*x1.size
+
+    if c2.dim == 3:
+        z2 = c2.cpts[2, :]
+    else:
+        z2 = [0]*x1.size
+
+    poly1 = np.array(tuple(zip(x1, y1, z1)))
+    poly2 = np.array(tuple(zip(x2, y2, z2)))
 
     cnt += 1
-    if cnt > 10:
-        return -1
+    if cnt > 1000:
+        return (-1, -1, -1)
 
-    ub = _upperbound(c1.cpts, c2.cpts)
-    lb = gjk(poly1, poly2, maxIter=10)
+#    lb = gjk(poly1, poly2, maxIter=10)
+#    closestPts, lb = gjkNew(poly1, poly2)
+
+    flag, info = gjkNew(poly1, poly2)
+    if flag > 0:
+        closest1 = info[0]
+        closest2 = info[1]
+        lb = info[2]
+#    else:
+#        lb = 0
+
+        # Check to see if the closest point on the shape is a control point
+        p1idx = np.where((poly1 == closest1).all(axis=1))[0]
+        p2idx = np.where((poly2 == closest2).all(axis=1))[0]
+        if p1idx.size > 0:
+            t1 = p1idx[0]/c1.deg
+
+        # If the closest point is not a control point, find t by weighting all the
+        # control points by their distance from the closest point
+        else:
+            eucDist1 = np.linalg.norm(closest1-c1.cpts.T, axis=1)
+    #        eucDistNorm1 = eucDist1/eucDist1.sum()
+    #        D = eucDist1.sum()
+            N = eucDist1.size
+            W = np.empty(N)
+            for i in range(N):
+                W[i] = 1 / (eucDist1[i]/eucDist1).sum()
+
+            t1 = (W*range(N)/N).sum()
+            if np.isnan(t1):
+                print(f't1 is nan, W: {W}, N: {N}, eucDist: {eucDist1},\n'
+                      f'closest1: {closest1},\nc1.cpts.T: {c1.cpts.T},\n'
+                      f'poly1: {poly1},\npoly2: {poly2}')
+#                input()
+
+
+    #        weights1 = eucDist1[sortIdx1[0:2]] / sum(eucDist1[sortIdx1[0:2]])
+    #        t1 = (weights1[0]*sortIdx1[0] + weights1[1]*sortIdx1[1])/c1.deg
+
+        if p2idx.size > 0:
+            t2 = p2idx[0]/c2.deg
+        else:
+    #        eucDist2 = (closest2-c2.cpts)**2
+    #        sortIdx2 = np.argsort(eucDist2)
+    #        weights2 = eucDist2[sortIdx2[0:2]] / sum(eucDist2[sortIdx2[0:2]])
+    #        t2 = (weights2[0]*sortIdx2[0] + weights2[1]*sortIdx2[1])/c2.deg
+
+            eucDist2 = np.linalg.norm(closest2-c2.cpts.T, axis=1)
+            N = eucDist2.size
+            W = np.empty(N)
+            for i in range(N):
+                W[i] = 1 / (eucDist2[i]/eucDist2).sum()
+
+            t2 = (W*range(N)/N).sum()
+
+    else:
+        t1 = 0.5
+        t2 = 0.5
+        lb = 0
+#        print(f'collision, ub: {ub}')
+
+#    print(f't1: {t1}, t2: {t2}, lb: {lb}, ub: {ub}')
+
+    t1 = 0.5
+    t2 = 0.5
+
+    t1len = t1_h - t1_l
+    t2len = t2_h - t2_l
+    print(f't1_l: {t1_l}\n'
+          f't1_h: {t1_h}\n'
+          f't2_l: {t2_l}\n'
+          f't2_h: {t2_h}\n'
+          f'cnt: {cnt}\n')
+
+    ub, t1local, t2local = _upperbound(c1.cpts, c2.cpts)
 
     if ub <= alpha:
         alpha = ub
+        newT1 = (1-t1local)*t1_l + t1local*t1_h
+        newT2 = (1-t2local)*t2_l + t2local*t2_h
+        print(f'NewT1: {newT1}, NewT2: {newT2}\n---')
+    else:
+        newT1 = -1
+        newT2 = -1
+
+    retval = (alpha, newT1, newT2)
 
     if lb >= alpha*(1-eps):
-        return alpha
-    else:
-        c3, c4 = c1.split(0.5)
-        c5, c6 = c2.split(0.5)
-        alpha = min(alpha, _minDist(c3, c5, cnt=cnt, alpha=alpha))
-        alpha = min(alpha, _minDist(c3, c6, cnt=cnt, alpha=alpha))
-        alpha = min(alpha, _minDist(c4, c5, cnt=cnt, alpha=alpha))
-        alpha = min(alpha, _minDist(c4, c6, cnt=cnt, alpha=alpha))
+        print('RETURNING')
+        print(retval)
+        print('===')
+        return retval
 
-    return alpha
+    else:
+        c3, c4 = c1.split(t1)
+        c5, c6 = c2.split(t2)
+        if np.isnan(c3.cpts).any():
+            print(f't1: {t1}, c3: {c3}')
+        if np.isnan(c4.cpts).any():
+            print(f't1: {t1}, c4: {c4}')
+        if np.isnan(c5.cpts).any():
+            print(f't2: {t2}, c5: {c5}')
+        if np.isnan(c6.cpts).any():
+            print(f't2: {t2}, c6: {c6}')
+
+        newAlpha, newT1, newT2 = _minDist(c3, c5, cnt=cnt, alpha=retval[0],
+                                          t1_l=t1_l, t1_h=t1_l+t1*t1len,
+                                          t2_l=t2_l, t2_h=t2_l+t2*t2len)
+
+        print(f'->newT1: {newT1}, newT2: {newT2}, retval: {retval}\n')
+        if newAlpha < retval[0]:
+            retval = (newAlpha, newT1, newT2)
+
+        newAlpha, newT1, newT2 = _minDist(c3, c6, cnt=cnt, alpha=retval[0],
+                                          t1_l=t1_l, t1_h=t1_l+t1*t1len,
+                                          t2_l=t2_l+t2*t2len, t2_h=t2_h)
+
+        print(f'->newT1: {newT1}, newT2: {newT2}, retval: {retval}\n')
+        if newAlpha < retval[0]:
+            retval = (newAlpha, newT1, newT2)
+
+        newAlpha, newT1, newT2 = _minDist(c4, c5, cnt=cnt, alpha=retval[0],
+                                          t1_l=t1_l+t1*t1len, t1_h=t1_h,
+                                          t2_l=t2_l, t2_h=t2_l+t2*t2len)
+        print(f'->newT1: {newT1}, newT2: {newT2}, retval: {retval}\n')
+
+        if newAlpha < retval[0]:
+            retval = (newAlpha, newT1, newT2)
+
+        newAlpha, newT1, newT2 = _minDist(c4, c6, cnt=cnt, alpha=retval[0],
+                                          t1_l=t1_l+t1*t1len, t1_h=t1_h,
+                                          t2_l=t2_l+t2*t2len, t2_h=t2_h)
+        print(f'->newT1: {newT1}, newT2: {newT2}, retval: {retval}\n')
+
+        if newAlpha < retval[0]:
+            retval = (newAlpha, newT1, newT2)
+
+#        alpha = min(alpha, _minDist(c3, c5, cnt=cnt, alpha=alpha,
+#                                    t1_l=t1_l, t1_h=t1_l+t1*t1len,
+#                                    t2_l=t2_l, t2_h=t2_l+t2*t2len))
+#
+#        alpha = min(alpha, _minDist(c3, c6, cnt=cnt, alpha=alpha,
+#                                    t1_l=t1_l, t1_h=t1_l+t1*t1len,
+#                                    t2_l=t2_l+t2*t2len, t2_h=t2_h))
+#
+#        alpha = min(alpha, _minDist(c4, c5, cnt=cnt, alpha=alpha,
+#                                    t1_l=t1_l+t1*t1len, t1_h=t1_h,
+#                                    t2_l=t2_l, t2_h=t2_l+t2*t2len))
+#
+#        alpha = min(alpha, _minDist(c4, c6, cnt=cnt, alpha=alpha,
+#                                    t1_l=t1_l+t1*t1len, t1_h=t1_h,
+#                                    t2_l=t2_l+t2*t2len, t2_h=t2_h))
+
+    return retval
 
 
 @njit(cache=True)
 def _upperbound(c1, c2):
+    """
+    """
     distances = np.empty(4)
+    tvals = np.array([(0., 0.),
+                      (0., 1.),
+                      (1., 0.),
+                      (1., 1.)])
 
     distances[0] = _norm(c1[:, 0] - c2[:, 0])
     distances[1] = _norm(c1[:, 0] - c2[:, -1])
     distances[2] = _norm(c1[:, -1] - c2[:, 0])
     distances[3] = _norm(c1[:, -1] - c2[:, -1])
 
-    return distances.min()
+    t1, t2 = tvals[distances.argmin()]
+
+    return distances.min(), t1, t2
 
 
 @njit(cache=True)
 def _norm(x):
-    return np.sqrt(x[0]**2 + x[1]**2)
+    """
+    """
+    summation = 0
+    for val in x:
+        summation += val*val
+
+    return np.sqrt(summation)
+
+
+def _collCheckBez2Bez(c1, c2, cnt=0, alpha=np.inf, eps=1e-3):
+    """
+    Source: Computation of the minimum distance between two Bezier
+    curves/surfaces
+    """
+    x1 = c1.cpts[0, :]
+    y1 = c1.cpts[1, :]
+    x2 = c2.cpts[0, :]
+    y2 = c2.cpts[1, :]
+
+    if c1.dim == 3:
+        z1 = c1.cpts[2, :]
+    else:
+        z1 = [0]*x1.size
+
+    if c2.dim == 3:
+        z2 = c2.cpts[2, :]
+    else:
+        z2 = [0]*x1.size
+
+    poly1 = np.array(tuple(zip(x1, y1, z1)))
+    poly2 = np.array(tuple(zip(x2, y2, z2)))
+
+    cnt += 1
+    if cnt > 100:
+        return -1
+
+    ub, t1local, t2local = _upperbound(c1.cpts, c2.cpts)
+
+    flag, info = gjkNew(poly1, poly2)
+    if flag > 0:
+        return 1
+    else:
+        t1 = 0.5
+        t2 = 0.5
+        lb = 0
+
+    if ub <= alpha:
+        alpha = ub
+
+    if lb >= alpha*(1-eps):
+        return alpha
+
+    else:
+        c3, c4 = c1.split(t1)
+        c5, c6 = c2.split(t2)
+        alpha = min(alpha, _collCheckBez2Bez(c3, c5, cnt=cnt, alpha=alpha))
+        alpha = min(alpha, _collCheckBez2Bez(c3, c6, cnt=cnt, alpha=alpha))
+        alpha = min(alpha, _collCheckBez2Bez(c4, c5, cnt=cnt, alpha=alpha))
+        alpha = min(alpha, _collCheckBez2Bez(c4, c6, cnt=cnt, alpha=alpha))
+
+    return alpha
 
 
 # TODO
@@ -1225,3 +1471,56 @@ def _normSquare(x, Nveh, Ndim, prodM):
             S[i, Ndim*i+j] = 1
 
     return np.dot(S, xsquare)
+
+
+if __name__ == '__main__':
+    cpts1 = np.array([(0, 1, 2, 3, 4, 5),
+                      (1, 2, 0, 0, 2, 1),
+                      (0, 1, 2, 3, 4, 5)])
+
+    cpts2 = np.array([(0, 1, 2, 3, 4, 5),
+                      (3, 2, 0, 0, 2, 3),
+                      (5, 4, 3, 2, 1, 0)]) + 3
+
+    cpts3 = np.array([(0, 1, 2, 3, 4, 5),
+                      (0, 1, 2, 3, 4, 5),
+                      (0, 0, 0, 0, 0, 0)])
+
+    cpts4 = np.array([(5, 4, 3, 2, 1, 0),
+                      (0, 1, 2, 3, 4, 5),
+                      (0, 0, 0, 0, 0, 0,)])
+
+    c1 = Bezier(cpts1)
+    c2 = Bezier(cpts2)
+    c3 = Bezier(cpts3)
+    c4 = Bezier(cpts4)
+
+    print(_collCheckBez2Bez(c1, c2))
+    print(_collCheckBez2Bez(c3, c4))
+
+    discreteMinDist = np.inf
+    for i, pt1 in enumerate(c1.curve.T):
+        for j, pt2 in enumerate(c2.curve.T):
+            temp = np.linalg.norm(pt1-pt2)
+            if temp < discreteMinDist:
+                idx1 = i
+                idx2 = j
+                discreteMinDist = temp
+
+    print(f'Disc Min Dist: {discreteMinDist}, idx1: {idx1}, idx2: {idx2}')
+    print('+++++++++++++++++++++++++++++++++++++')
+
+    dist, t1, t2 = c1.minDist(c2)
+    print(f'MinDist: {dist}, t1: {t1}, t2: {t2}')
+    pt1 = c1(t1)
+    pt2 = c2(t2)
+
+    plt.close('all')
+    ax = c1.plot()
+    c2.plot(ax)
+
+    plt.plot(np.array((pt1[0], pt2[0])).squeeze(),
+             np.array((pt1[1], pt2[1])).squeeze(),
+             np.array((pt1[2], pt2[2])).squeeze())
+
+    plt.show()

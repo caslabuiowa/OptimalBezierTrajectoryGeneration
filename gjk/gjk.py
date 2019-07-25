@@ -16,9 +16,6 @@ Created on Sun Nov 11 21:25:46 2018
 
 from numba import njit
 import numpy as np
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from scipy.spatial import ConvexHull
 
 
 def gjk(polygon1, polygon2, method='nearest', *args, **kwargs):
@@ -232,21 +229,22 @@ def tripleProduct(a, b, c):
 #@njit(cache=True)
 def gjkNew(poly1, poly2, maxIter=128, verbose=False):
     """
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    NOTES
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    I can use the current direction along with the support functions to find
-    which points were used to build the current simplex (this is how I will
-    find the location of where the collision/min dist occurs)
+
+    RETURNS:
+        flag (int) - The flag will either be -1, 0, or 1:
+            * -1: Maximum number of iterations met
+            * 0: Collision detected
+            * 1: No collision detected, minimum distance available
+
+        info (tuple) - If flag is 1, info will contain 3 values:
+            * info[0]: point on poly1 at which the minimum distance occurs
+            * info[1]: point on poly2 at which the minimum distance occurs
+            * info[3]: minimum distance between the two shapes
+            If flag is -1 or 0, info will be an empty tuple.
     """
     simplex = dict()
 #    direction = poly1.mean(axis=0) - poly2.mean(axis=0)
     direction = np.array((1, 0, 0), dtype=float)
-
-#    # Add the first two points to the simplex
-#    simplex['B'] = support(poly1, direction) - support(poly2, -direction)
-#    direction = -direction
-#    simplex['A'] = support(poly1, direction) - support(poly2, -direction)
 
     for _ in range(maxIter):
 
@@ -256,23 +254,20 @@ def gjkNew(poly1, poly2, maxIter=128, verbose=False):
                   f'  --> Simplex: {simplex}')
 
         if 'collision' in simplex.keys():
-#            print('Collision')
-            return 0, 0
+            return 0, ()
 
         # No collision
         elif simplex['A'].dot(direction) < 0:
-#            print(f'No Collision, checking simplex:\n'
-#                  f'  A: {simplex["A"]}\n'
-#                  f'  B: {simplex["B"]}\n'
-#                  f'  C: {simplex["C"]}')
 
-            closestPt, distance = minimumDistance(poly1, poly2,
-                                                  simplex, direction)
+            closestPt1, closestPt2, distance = minimumDistance(poly1,
+                                                               poly2,
+                                                               simplex,
+                                                               direction)
 
-            return closestPt, distance
+            return 1, (closestPt1, closestPt2, distance)
 
     print('Maximum iterations met')
-    return -1, -1
+    return -1, ()
 
 
 def minimumDistance(poly1, poly2, simplex, direction):
@@ -300,7 +295,7 @@ def minimumDistance(poly1, poly2, simplex, direction):
 
         # Origin closest to A, C or AC
         if np.cross(ABC, AC).dot(A0) > 0:
-            print('AC')
+#            print('AC')
 #            closestPt, distance = closestPointToLine(simplex['A'],
 #                                                     simplex['C'])
             t, distance = weightedOriginToLine(simplex['A'],
@@ -310,7 +305,7 @@ def minimumDistance(poly1, poly2, simplex, direction):
 
         # Origin closest to A, B, or AB
         elif np.cross(AB, ABC).dot(A0) > 0:
-            print('AB')
+#            print('AB')
 #            closestPt, distance = closestPointToLine(simplex['A'],
 #                                                     simplex['B'])
             t, distance = weightedOriginToLine(simplex['A'],
@@ -320,7 +315,7 @@ def minimumDistance(poly1, poly2, simplex, direction):
 
         # Origin closest to plane ABC
         else:
-            print('Plane')
+#            print('Plane')
 #            print(f'Plane Simplex: {repr(simplex)}')
 #            closestPt, distance = closestPointToPlane(simplex['A'],
 #                                                      simplex['B'],
@@ -328,7 +323,7 @@ def minimumDistance(poly1, poly2, simplex, direction):
 #            poly1pt = -9999
 #            poly2pt = -9999
 
-            print(simplex)
+#            print(simplex)
             baryTriple, distance = weightedOriginToPlane(simplex['A'],
                                                          simplex['B'],
                                                          simplex['C'])
@@ -371,7 +366,7 @@ def minimumDistance(poly1, poly2, simplex, direction):
         raise ValueError('Simplex should at least be a point to check '
                          'for the minimum distance.')
 
-    return (poly1pt, poly2pt), distance
+    return poly1pt, poly2pt, distance
 
 
 @njit(cache=True)
@@ -492,18 +487,19 @@ def weightedOriginToPlane(A, B, C):
 
 
 #@njit(cache=True)
-def closestPointToPlane(A, B, C):
-#    print(f'A: {A}, B: {B}, C: {C}')
-    A0 = -A
-    N = np.cross(B-A, C-A)
-    n = N / np.linalg.norm(N)
+#def closestPointToPlane(A, B, C):
+##    print(f'A: {A}, B: {B}, C: {C}')
+#    A0 = -A
+#    N = np.cross(B-A, C-A)
+#    n = N / np.linalg.norm(N)
+#
+#    distance = A0.dot(n)
+#    closestPt = -distance*n
+#
+#    return closestPt, distance
 
-    distance = A0.dot(n)
-    closestPt = -distance*n
 
-    return closestPt, distance
-
-
+@njit(cache=True)
 def supportPts(poly1, poly2, direction):
     """
     """
@@ -564,7 +560,8 @@ def simplex1pt(poly1, poly2, simplex, direction):
 def simplex2pt(poly1, poly2, simplex):
     """
     """
-    closestPt, distance = closestPointToOrigin(simplex['A'], simplex['B'])
+    t, distance = weightedOriginToLine(simplex['A'], simplex['B'])
+    closestPt = (1-t)*simplex['A'] + t*simplex['B']
     direction = -closestPt
     simplex['C'] = simplex['A']
     simplex['Cpts'] = simplex['Apts']
@@ -695,11 +692,15 @@ def simplex4pt(poly1, poly2, simplex):
 
 # Test code
 if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
+    from scipy.spatial import ConvexHull
+
     poly1 = np.array([
             (4, 11, 0),
             (4, 5, 0),
             (9, 9, 0)
-            ])
+            ], dtype=float)
 
     poly2 = np.array([
             (5, 6, 0),
@@ -707,42 +708,42 @@ if __name__ == "__main__":
             (13, 1, 0),
             (12, 3, 0),
             (15, 6, 0)
-            ])
+            ], dtype=float)
 
     poly3 = np.array([
             (4, 11, -1),
             (4, 5, -1),
             (9, 9, -1),
             (7, 8, 3)
-            ])
+            ], dtype=float)
 
     poly4 = np.array([
             (4, 11, 3),
             (4, 5, 3),
             (9, 9, 3),
             (7, 8, -1)
-            ])
+            ], dtype=float)
 
     poly5 = np.array([
             (4, 11, -3),
             (4, 5, -3),
             (9, 9, -3),
             (7, 8, -1)
-            ])
+            ], dtype=float)
 
     poly6 = np.array([
             (4, 11, 0),
             (4, 5, 1),
             (9, 9, 2),
             (7, 8, 3)
-            ])
+            ], dtype=float)
 
     poly7 = np.array([
             (-1, -1, 0),
             (1, 1, 0),
             (1, -1, 0),
             (-1, 1, 0)
-            ])
+            ], dtype=float)
 
     poly8 = np.array([
             (-1, -1, -3),
@@ -750,109 +751,7 @@ if __name__ == "__main__":
             (1, -1, -3),
             (-1, 1, -3),
             (0, 0, -1)
-            ])
-
-#    retVal = gjk(poly1, poly2)
-#
-#    print(retVal)
-#
-#    poly3 = np.random.random((10, 3))
-#    poly4 = np.random.random((10, 3))+3
-#
-#    print(gjk(poly3, poly4))
-
-#    minDif = np.array([i-j for i in poly1 for j in poly2])
-#
-#    # Important how we define the initial direction because it affects the
-#    # normals to the surfaces in the tetrahedron (we want the normals all
-#    # pointing out of the tetrahedron).
-#    direction = poly1.mean(axis=0) - poly2.mean(axis=0)
-#
-#    A = support(poly1, direction) - support(poly2, -direction)
-#    B = support(poly1, -direction) - support(poly2, direction)
-#    closestPt, distance = closestPointToOrigin(A, B)
-#    direction = -closestPt
-#    C = support(poly1, direction) - support(poly2, -direction)
-#
-#    A0 = -A
-#    AB = B-A
-#    AC = C-A
-#
-#    print(f'A: {A},\nB: {B},\nC: {C}')
-#
-#    norm3d = np.cross(AB, AC)
-#    norm3d = norm3d*np.sign(norm3d.dot(A0))
-#    if norm3d.any():
-#        # 3D Case
-#        print('3d')
-#        # Multiply by the sign of the dot to make sure the normal
-#        # is facing in the direction of the origin
-#        direction = norm3d
-#        # By the way points are added to the simplex, D should always be on the
-#        # top of the tetrahedron
-#        D = support(poly1, direction) - support(poly2, -direction)
-#
-#        D0 = -D
-#        AD = D-A
-#        BD = D-B
-#        CD = D-C
-#
-#        abdNorm = np.cross(AD, BD)
-#        bcdNorm = np.cross(BD, CD)
-#        cadNorm = np.cross(CD, AD)
-#
-#        if abdNorm.dot(D0) > 0:
-#            direction = abdNorm
-#            C = support(poly1, direction) - support(poly2, -direction)
-#            if C.dot(direction) < 0:
-#                print('No intersection')
-#        elif bcdNorm.dot(D0) > 0:
-#            direction = bcdNorm
-#            A = support(poly1, direction) - support(poly2, -direction)
-#            if A.dot(direction) < 0:
-#                print('No intersection')
-#        elif cadNorm.dot(D0) > 0:
-#            direction = cadNorm
-#            B = support(poly1, direction) - support(poly2, -direction)
-#            if B.dot(direction) < 0:
-#                print('No intersection')
-#        else:
-#            print('Objects intersect')
-#
-#    else:
-#        # 2D Case
-#        print('2d')
-#        pass
-#
-#    print(f'D: {D}')
-#    print(f'ABD: {abdNorm}')
-#    print(f'BCD: {bcdNorm}')
-#    print(f'CAD: {cadNorm}')
-#
-#    import matplotlib.pyplot as plt
-#    from mpl_toolkits.mplot3d import Axes3D
-#    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-#
-#    plt.close('all')
-#    fig = plt.figure()
-#    ax = Axes3D(fig)
-##    ax.add_collection3d(Poly3DCollection([minDif.tolist()]))
-##    ax.add_collection3d(Poly3DCollection([poly2.tolist()]))
-#    ax.plot(minDif[:, 0], minDif[:, 1], minDif[:, 2], 'b.')
-#    ax.plot([A[0]], [A[1]], [A[2]], 'r+', markersize=13)
-#    ax.plot([B[0]], [B[1]], [B[2]], 'g+', markersize=13)
-#    ax.plot([C[0]], [C[1]], [C[2]], 'b+', markersize=13)
-#    ax.plot([D[0]], [D[1]], [D[2]], 'k+', markersize=13)
-#    ax.plot([0], [0], [0], 'go')
-#
-#    ax.set_xlim([-10, 10])
-#    ax.set_ylim([-10, 10])
-#    ax.set_zlim([-10, 10])
-#
-#    ax.set_xlabel('x')
-#    ax.set_ylabel('y')
-#    ax.set_zlabel('z')
-#    plt.show()
+            ], dtype=float)
 
     plt.close('all')
 
@@ -866,7 +765,12 @@ if __name__ == "__main__":
 
     polyTest = [poly5, poly6]
 
-    polyPts, dist = gjkNew(polyTest[0], polyTest[1])
+    flag, info = gjkNew(polyTest[0], polyTest[1])
+    if flag > 0:
+        polyPts = info[0:2]
+    else:
+        print('Warning, no minimum distance computed')
+        polyPts = ([0]*3, [0]*3)
     polyPts = np.array(polyPts)
 
     fig = plt.figure()
