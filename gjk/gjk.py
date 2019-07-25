@@ -294,20 +294,14 @@ def minimumDistance(poly1, poly2, simplex, direction):
         ABC = np.cross(AB, AC)
 
         # Origin closest to A, C or AC
-        if np.cross(ABC, AC).dot(A0) > 0:
-#            print('AC')
-#            closestPt, distance = closestPointToLine(simplex['A'],
-#                                                     simplex['C'])
+        if np.cross(ABC, AC).dot(A0) >= 0:
             t, distance = weightedOriginToLine(simplex['A'],
                                                simplex['C'])
             poly1pt = (1-t)*simplex['Apts'][0] + t*simplex['Cpts'][0]
             poly2pt = (1-t)*simplex['Apts'][1] + t*simplex['Cpts'][1]
 
         # Origin closest to A, B, or AB
-        elif np.cross(AB, ABC).dot(A0) > 0:
-#            print('AB')
-#            closestPt, distance = closestPointToLine(simplex['A'],
-#                                                     simplex['B'])
+        elif np.cross(AB, ABC).dot(A0) >= 0:
             t, distance = weightedOriginToLine(simplex['A'],
                                                simplex['B'])
             poly1pt = (1-t)*simplex['Apts'][0] + t*simplex['Bpts'][0]
@@ -315,15 +309,6 @@ def minimumDistance(poly1, poly2, simplex, direction):
 
         # Origin closest to plane ABC
         else:
-#            print('Plane')
-#            print(f'Plane Simplex: {repr(simplex)}')
-#            closestPt, distance = closestPointToPlane(simplex['A'],
-#                                                      simplex['B'],
-#                                                      simplex['C'])
-#            poly1pt = -9999
-#            poly2pt = -9999
-
-#            print(simplex)
             baryTriple, distance = weightedOriginToPlane(simplex['A'],
                                                          simplex['B'],
                                                          simplex['C'])
@@ -348,8 +333,6 @@ def minimumDistance(poly1, poly2, simplex, direction):
 
     # 2 point simplex
     elif 'B' in simplex.keys():
-#        closestPt, distance = closestPointToLine(simplex['A'],
-#                                                 simplex['B'])
         t, distance = weightedOriginToLine(simplex['A'],
                                            simplex['B'])
         poly1pt = (1-t)*simplex['Apts'][0] + t*simplex['Bpts'][0]
@@ -357,7 +340,6 @@ def minimumDistance(poly1, poly2, simplex, direction):
 
     # 1 point simplex
     elif 'A' in simplex.keys():
-#        closestPt = simplex['A']
         distance = np.linalg.norm(simplex['A'])
         poly1pt = simplex['Apts'][0]
         poly2pt = simplex['Apts'][1]
@@ -428,7 +410,7 @@ def weightedOriginToLine(A, B):
         line-segment-which-is-the-closest-to-other-point-not-on-the-li
     """
     if (A == B).all():
-        print('[!] Warning, points are identical.')
+#        print('[!] Warning, points are identical.')
         return 0, np.sqrt(dot(A, A))
 
     v = B - A
@@ -583,7 +565,7 @@ def simplex3pt(poly1, poly2, simplex):
     # If origin is out of simplex and closest to A or AC
     if np.cross(ABC, AC).dot(A0) > 0:
         # If closest to line AC
-        if AC.dot(A0):
+        if AC.dot(A0) > 0:
             direction = np.cross(np.cross(AC, A0), AC)
             # Keep points A and C, replace B
             simplex['B'] = simplex['A']
