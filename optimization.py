@@ -331,13 +331,14 @@ def _temporalSeparationConstraints(y, nVeh, dim, maxSep):
         for i in range(nVeh):
             vehList.append(bez.Bezier(y[i*dim:(i+1)*dim, :]))
 
-        for i in range(nVeh):
-            for j in range(i, nVeh):
-                if j > i:
-                    dv = vehList[i] - vehList[j]
-                    distVeh.append(dv.normSquare().elev(DEG_ELEV))
+        for i in range(nVeh-1):
+            for j in range(i+1, nVeh):
+                dv = vehList[i] - vehList[j]
+                distVeh.append(dv.normSquare().elev(DEG_ELEV))
+#                distVeh.append(dv.normSquare().min())
 
         distances = np.concatenate([i.cpts.squeeze() for i in distVeh])
+#        distances = np.array(distVeh)
 
         return (distances - maxSep**2).squeeze()
 
@@ -476,16 +477,27 @@ def _euclideanObjective(y, nVeh, dim):
     :rtype: float
     """
     summation = 0.0
-    temp = np.zeros(3)
+    temp = np.empty(3)
     length = y.shape[1]
     for veh in range(nVeh):
         for i in range(length-1):
             for j in range(dim):
                 temp[j] = y[veh*dim+j, i+1] - y[veh*dim+j, i]
 
-            summation += np.linalg.norm(temp)
+            summation += _norm(temp)  # np.linalg.norm(temp)
 
     return summation
+
+
+@njit(cache=True)
+def _norm(x):
+    """
+    """
+    summation = 0.
+    for val in x:
+        summation += val*val
+
+    return np.sqrt(summation)
 
 
 def _minAccelObjective(y, nVeh, dim, tf):

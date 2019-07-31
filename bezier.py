@@ -42,6 +42,8 @@ class BezierParams:
     :type tau: numpy.ndarray or None
     :param tf: Final time of the Bezier curve trajectory.
     :type tf: float
+    :param fastInit: If true, init skips data type checks.
+    "type fastInit: bool
     """
     splitCache = defaultdict(dict)
     elevationMatrixCache = defaultdict(dict)
@@ -49,13 +51,10 @@ class BezierParams:
     diffMatrixCache = defaultdict(dict)
     bezCoefCache = dict()
 
-    def __init__(self, cpts=None, tau=None, tf=1.0):
+    def __init__(self, cpts=None, tau=None, tf=1.0, fastInit=False):
         self._tau = tau
         self._tf = float(tf)
         self._curve = None
-
-#        if tau is None:
-#            self._tau = np.linspace(0, self._tf, 1001)
 
         if cpts is not None:
             # Checking to see if the cpts are in the desired format. If they
@@ -229,8 +228,8 @@ class Bezier(BezierParams):
         :return: Deep copy of Bezier object
         :rtype: Bezier
         """
-        return Bezier(self.cpts, self.tau, self.tf)
-#        return Bezier(self.cpts, None, self.tf)
+#        return Bezier(self.cpts, self.tau, self.tf)
+        return Bezier(self.cpts, None, self.tf)
 
     def plot(self, axisHandle=None, showCpts=True, **kwargs):
         """Plots the Bezier curve in 1D or 2D
@@ -262,7 +261,7 @@ class Bezier(BezierParams):
             if showCpts:
                 ax.plot(np.linspace(0, self.tf, self.deg+1),
                         self.cpts.squeeze(), '.--')
-        elif self.dim == 2:
+        elif self.dim == 2 or (self.cpts[2, :] == 0).all():
             ax.plot(self.curve[0], self.curve[1], **kwargs)
             if showCpts:
                 ax.plot(cpts[0], cpts[1], '.--')
@@ -380,14 +379,14 @@ class Bezier(BezierParams):
         :rtype: RationalBezier
         """
         if not isinstance(denominator, Bezier):
-            msg = ('The denominator must be a Bezier object, not a %s. '
+            msg = ('The denominator must be a Bezier object, not a {}. '
                    'Or the module has been reloaded.').format(
                            type(denominator))
             raise TypeError(msg)
 
         cpts = np.empty((self.dim, self.deg+1))
-        for i in range(self.dim+1):
-            for j in range(self.deg+2):
+        for i in range(self.dim):
+            for j in range(self.deg+1):
                 if self.cpts[i, j] == 0:
                     cpts[i, j] = 0
                 else:
@@ -771,7 +770,7 @@ class Bezier(BezierParams):
             prodM = prodMatrix(self.deg).T
             Bezier.productMatrixCache[self.deg][self.deg] = prodM
 
-        normCpts = _normSquare(self.cpts, 1, self.dim, prodM.T)
+        normCpts = _normSquare(self.cpts, 1, self.dim, prodM.T)/2
 
         newCurve = self.copy()
         newCurve.cpts = normCpts
@@ -913,7 +912,7 @@ def bezierCurve(cpts, tau, tf=1.0):
     return curve
 
 
-@jit(cache=True)
+@jit(cache=True, forceobj=True)
 def buildBezMatrix(n):
     """Builds a matrix of coefficients of the power basis to a Bernstein
     polynomial.
@@ -971,7 +970,7 @@ def diffMatrix(n, tf=1.0):
     return Dm
 
 
-@jit(cache=True)
+#@jit(cache=True, forceobj=True)
 def elevMatrix(N, R=1):
     """Creates an elevation matrix for a Bezier curve.
 
@@ -995,7 +994,7 @@ def elevMatrix(N, R=1):
     return T
 
 
-@jit(cache=True)
+@jit(cache=True, forceobj=True)
 def prodMatrix(N):
     """Produces a product matrix for obtaining the norm of a Bezier curve
 
@@ -1027,7 +1026,7 @@ def prodMatrix(N):
 # TODO:
 #    Change this function name to prodM.
 #    Clean up and slightly change _normSquare to accommodate this change
-@jit(cache=True)
+#@jit(cache=True, forceobj=True)
 def bezProductCoefficients(m, n=None):
     """Produces a product matrix for obtaining the product of two Bezier curves
 
@@ -1056,7 +1055,7 @@ def bezProductCoefficients(m, n=None):
     return coefMat
 
 
-@jit(cache=True)
+@jit(cache=True, forceobj=True)
 def multiplyBezCurves(multiplier, multiplicand, coefMat=None):
     """Multiplies two Bezier curves together
 
@@ -1094,7 +1093,7 @@ def multiplyBezCurves(multiplier, multiplicand, coefMat=None):
     return np.dot(newMat, coefMat)
 
 
-@jit(cache=True)
+@jit(cache=True, forceobj=True)
 def splitCurveMat(deg, z, coefMat=None):
     """Creates matrices Q and Qp that are used to compute control points for a
         split curve.
@@ -1148,6 +1147,9 @@ def _minDist(c1, c2, cnt=0, alpha=np.inf, eps=1e-9,
         z2 = c2.cpts[2, :]
     else:
         z2 = [0]*x1.size
+
+    c1 = Bezier([x1, y1, z1])
+    c2 = Bezier([x2, y2, z2])
 
     poly1 = np.array(tuple(zip(x1, y1, z1)))
     poly2 = np.array(tuple(zip(x2, y2, z2)))
@@ -1253,7 +1255,7 @@ def _minDist(c1, c2, cnt=0, alpha=np.inf, eps=1e-9,
     return retval
 
 
-def _minDist2Poly(c1, poly2, cnt=0, alpha=np.inf, eps=1e-9, t1_l=0, t1_h=1):
+def _minDist2Poly(c1, poly2, cnt=0, alpha=np.inf, eps=1e-6, t1_l=0, t1_h=1):
     """Similar to _minDist but finds the distance between a curve and a polygon
     """
     x1 = c1.cpts[0, :]
@@ -1263,6 +1265,8 @@ def _minDist2Poly(c1, poly2, cnt=0, alpha=np.inf, eps=1e-9, t1_l=0, t1_h=1):
         z1 = c1.cpts[2, :]
     else:
         z1 = [0]*x1.size
+
+    c1 = Bezier([x1, y1, z1])
 
     poly1 = np.array(tuple(zip(x1, y1, z1)))
     poly2 = poly2.astype(float)
@@ -1307,7 +1311,7 @@ def _minDist2Poly(c1, poly2, cnt=0, alpha=np.inf, eps=1e-9, t1_l=0, t1_h=1):
         t1 = 0.5
         newT1 = -1
         closest2 = -1
-        lb = eps
+        lb = eps**3
         ub = np.inf
 
     t1len = t1_h - t1_l
@@ -1421,6 +1425,9 @@ def _collCheckBez2Bez(c1, c2, cnt=0, alpha=np.inf, eps=1e-9):
     else:
         z2 = [0]*x1.size
 
+    c1 = Bezier([x1, y1, z1])
+    c2 = Bezier([x2, y2, z2])
+
     poly1 = np.array(tuple(zip(x1, y1, z1)))
     poly2 = np.array(tuple(zip(x2, y2, z2)))
 
@@ -1468,42 +1475,51 @@ def _collCheckBez2Poly(c1, poly2, cnt=0, alpha=np.inf, eps=1e-9):
     else:
         z1 = [0]*x1.size
 
+    c1 = Bezier([x1, y1, z1])
+
     poly1 = np.array(tuple(zip(x1, y1, z1)))
 
     cnt += 1
-    if cnt > 1000:
+    if cnt > 100:
         return -1
 
     flag, info = gjkNew(poly1, poly2)
     if flag > 0:
         return 1
     else:
-        t1 = 0.5
-        lb = eps
+#        t1 = 0.5
+#        lb = eps
 
-    ub = np.inf
+        c3, c4 = c1.split(0.5)
+        if (_collCheckBez2Poly(c3, poly2, cnt=cnt) == 1 and
+            _collCheckBez2Poly(c4, poly2, cnt=cnt) == 1):
+            return 1
 
-    flag1, info1 = gjkNew(poly2, np.atleast_2d(poly1[0]))
-    flag2, info2 = gjkNew(poly2, np.atleast_2d(poly1[-1]))
+    return 0
 
-    if flag1 > 0:
-        ub = info1[2]
-
-    if flag2 > 0 and info2[2] < ub:
-        ub = info2[2]
-
-    if ub <= alpha:
-        alpha = ub
-
-    if lb >= alpha*(1-eps):
-        return round(alpha, int(round(np.log(eps)/np.log(10))))
-
-    else:
-        c3, c4 = c1.split(t1)
-        alpha = min(alpha, _collCheckBez2Poly(c3, poly2, cnt=cnt, alpha=alpha))
-        alpha = min(alpha, _collCheckBez2Poly(c4, poly2, cnt=cnt, alpha=alpha))
-
-    return alpha
+#    ub = np.inf
+#
+#    flag1, info1 = gjkNew(poly2, np.atleast_2d(poly1[0]))
+#    flag2, info2 = gjkNew(poly2, np.atleast_2d(poly1[-1]))
+#
+#    if flag1 > 0:
+#        ub = info1[2]
+#
+#    if flag2 > 0 and info2[2] < ub:
+#        ub = info2[2]
+#
+#    if ub <= alpha:
+#        alpha = ub
+#
+#    if lb >= alpha*(1-eps):
+#        return round(alpha, int(round(np.log(eps)/np.log(10))))
+#
+#    else:
+#        c3, c4 = c1.split(t1)
+#        alpha = min(alpha, _collCheckBez2Poly(c3, poly2, cnt=cnt, alpha=alpha))
+#        alpha = min(alpha, _collCheckBez2Poly(c4, poly2, cnt=cnt, alpha=alpha))
+#
+#    return alpha
 
 
 # TODO
