@@ -581,7 +581,7 @@ class Bezier(BezierParams):
         minIdx = np.argmin(self.cpts[dim, :])
         newMin = min(self.cpts[dim, :])
 
-        error = np.abs(globMin-newMin) / newMin
+        error = np.abs(globMin-newMin)
 
         if error < tol:
             return newMin
@@ -677,7 +677,7 @@ class Bezier(BezierParams):
         maxIdx = np.argmax(self.cpts[dim, :])
         newMax = max(self.cpts[dim, :])
 
-        error = np.abs(globMax-newMax) / newMax
+        error = np.abs(globMax-newMax)
 
         if error < tol:
             return newMax
