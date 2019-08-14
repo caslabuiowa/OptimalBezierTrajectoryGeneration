@@ -279,6 +279,15 @@ def minimumDistance(poly1, poly2, simplex, direction):
         simplex, direction = doSimplex(poly1, poly2, simplex, direction)
 
         for point in oldSimplex.values():
+#            print()
+#            print('Old:')
+#            for key in oldSimplex.keys():
+#                print(f'  {key}: {oldSimplex[key]}')
+#            print('---')
+#            print('New:')
+#            for key in simplex.keys():
+#                print(f'  {key}: {simplex[key]}')
+#            print('=======================================================')
             if (simplex['A'] == point).all():
                 converged = True
                 simplex = oldSimplex.copy()

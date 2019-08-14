@@ -56,10 +56,11 @@ def animateTrajectory(trajectories):
 
 
 if __name__ == '__main__':
-    plt.close('all')
+#    plt.close('all')
     plt.rcParams.update({
         'font.size': 40,
         'pdf.fonttype': 42,
+        'ps.fonttype': 42,
         'xtick.labelsize': 40,
         'ytick.labelsize': 40,
         'lines.linewidth': 4,
@@ -100,7 +101,7 @@ if __name__ == '__main__':
                 {'type': 'ineq', 'fun': lambda x: x[-1]}]
 
     _ = bez.Bezier(bezopt.reshapeVector(xGuess))
-    _.elev(30)
+    _.elev(10)
     _ = _*_
 
     startTime = time.time()
@@ -111,8 +112,6 @@ if __name__ == '__main__':
                 method='SLSQP',
                 constraints=ineqCons,
                 options={'maxiter': 250,
-#                         'ftol': 1e-3,
-#                         'eps': 1e-6,
                          'disp': True,
                          'iprint': 2}
                 )
@@ -156,7 +155,7 @@ if __name__ == '__main__':
     for i in range(numVeh):
         curves.append(bez.Bezier(cpts[i*dim:(i+1)*dim]))
     for curve in curves:
-        plt.plot(curve.curve[0], curve.curve[1], '-', label='Elevated by 10')
+        plt.plot(curve.curve[0], curve.curve[1], '-', label='Elevated by 100')
 #        plt.plot(curve.cpts[0], curve.cpts[1], '.--')
 
     obstacle1 = plt.Circle(bezopt.pointObstacles[0],

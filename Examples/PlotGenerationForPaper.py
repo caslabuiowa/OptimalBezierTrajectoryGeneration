@@ -41,10 +41,11 @@ def plotPoly(poly, ax, linecolor='b'):
 
 
 if __name__ == '__main__':
-    plt.close('all')
+#    plt.close('all')
     plt.rcParams.update({
             'font.size': 40,
             'pdf.fonttype': 42,
+            'ps.fonttype': 42,
             'xtick.labelsize': 40,
             'ytick.labelsize': 40,
             'lines.linewidth': 4,
@@ -161,8 +162,8 @@ if __name__ == '__main__':
     ax2.set_ylim((-0.5, 9.5))
     ax1.set_yticks(np.arange(1, 10, 2))
     ax2.set_yticks(np.arange(1, 10, 2))
-    ax1.set_xticks(np.arange(-2, 9, 2))
-    ax2.set_xticks(np.arange(-3, 4, 2))
+    ax1.set_xticks(np.arange(0, 9, 2))
+    ax2.set_xticks(np.arange(0, 5, 2))
 
     # ---
     # Elevation and extrema
@@ -211,4 +212,4 @@ if __name__ == '__main__':
     ax3.set_yticks(np.arange(0, 9, 2))
 
     plt.show()
-    plt.rcParams.update(plt.rcParamsDefault)
+#    plt.rcParams.update(plt.rcParamsDefault)
