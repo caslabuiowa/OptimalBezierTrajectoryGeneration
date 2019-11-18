@@ -14,7 +14,7 @@ import numpy as np
 import bezier as bez
 
 
-DEG_ELEV = 10
+DEG_ELEV = 0
 
 
 class BezOptimization:

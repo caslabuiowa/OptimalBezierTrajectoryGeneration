@@ -169,14 +169,32 @@ class Bezier(BezierParams):
     def __repr__(self):
         return 'Bezier({}, {}, {})'.format(self.cpts, self.tau, self.tf)
 
-    def __call__(self, t):
-        """Calling the curve returns a single value at the passed in t value
-        """
-        pt = np.empty((self.dim, 1))
-        for i, pts in enumerate(self.cpts):
-            pt[i] = deCasteljauCurve(pts, np.array([t]), self.tf)
+#    def __call__(self, t):
+#        """Calling the curve returns a single value at the passed in t value
+#        """
+#        pt = np.empty((self.dim, 1))
+#        for i, pts in enumerate(self.cpts):
+#            pt[i] = deCasteljauCurve(pts, np.array([t]), self.tf)
+#
+#        return pt
 
-        return pt
+    def __call__(self, t):
+        """Calling the object returns the values of the curve at the t values
+
+        Note that unlike the curve property, this will NOT cache the computed
+        values. This is meant to be a convenience function to quickly peek at
+        the values of the curve.
+
+        :param t: Single value or numpy array of values at which to compute the
+            curve.
+        :type t: float or numpy.ndarray
+        """
+        tau = np.atleast_1d(t)
+        curve = np.empty((self.dim, tau.size))
+        for i, pts in enumerate(self.cpts):
+            curve[i] = deCasteljauCurve(pts, tau, self.tf)
+
+        return curve
 
     @property
     def x(self):
@@ -212,8 +230,8 @@ class Bezier(BezierParams):
 
     @property
     def curve(self):
-        if self._tau is None:
-            self._tau = np.arange(0, 1.01, 0.01)
+#        if self._tau is None:
+#            self._tau = np.arange(0, 1.01, 0.01)
 
         if self._curve is None:
             self._curve = np.zeros([self.dim, len(self.tau)])
@@ -295,6 +313,11 @@ class Bezier(BezierParams):
     def sub(self, other):
         """Subtracts two Bezier curves
 
+        If the final times of the two curves do not match, the longer curve is
+        split at the final time of the shorter curve. The resulting curve will
+        have a final time equal to that of the shorter curve. Note that the
+        initial time is always assumed to be 0 for Bezier objects.
+
         Paper Reference: Property 7: Arithmetic Operations
 
         :param other: Bezier curve to subtract from the original
@@ -302,8 +325,24 @@ class Bezier(BezierParams):
         :return: Original curve - Other curve
         :rtype: Bezier
         """
-        subCpts = self.cpts - other.cpts
-        newCurve = self.copy()
+        if self.tf == other.tf:
+            subCpts = self.cpts - other.cpts
+            newCurve = self.copy()
+
+        elif self.tf > other.tf:
+            tsplit = other.tf
+            tempCurve, _ = self.split(tsplit)
+            subCpts = tempCurve.cpts - other.cpts
+            newCurve = tempCurve.copy()
+            newCurve.tf = other.tf
+
+        else:
+            tsplit = self.tf
+            tempCurve, _ = other.split(tsplit)
+            subCpts = self.cpts - tempCurve.cpts
+            newCurve = self.copy()
+            newCurve.tf = self.tf
+
         newCurve.cpts = subCpts
         return newCurve
 
@@ -487,7 +526,7 @@ class Bezier(BezierParams):
         cpts2 = []
 
         if np.isnan(tDiv):
-            print(f'[!] Warning, tDiv is {tDiv}, changing to 0.')
+            print('[!] Warning, tDiv is {}, changing to 0.'.format(tDiv))
             tDiv = 0
 
         for d in range(self.dim):
@@ -1710,7 +1749,7 @@ if __name__ == '__main__':
     print('Minimum distances')
     print('C1 and C2')
     dist, t1, t2 = c1.minDist(c2)
-    print(f'MinDist: {dist}, t1: {t1}, t2: {t2}')
+    print('MinDist: {}, t1: {}, t2: {}'.format(dist, t1, t2))
     pt1 = c1(t1)
     pt2 = c2(t2)
 
@@ -1734,7 +1773,8 @@ if __name__ == '__main__':
                     discPt2 = pt2
                     discreteMinDist = temp
 
-        print(f'Disc Min Dist: {discreteMinDist}, idx1: {idx1}, idx2: {idx2}')
+        print('Disc Min Dist: {}, idx1: {}, idx2: {}'.format(discreteMinDist,
+              idx1, idx2))
         print('+++++++++++++++++++++++++++++++++++++')
         plt.plot(c1.curve[0, :], c1.curve[1, :], c1.curve[2, :], '-.')
         plt.plot(c2.curve[0, :], c2.curve[1, :], c2.curve[2, :], '-.')
@@ -1744,7 +1784,7 @@ if __name__ == '__main__':
 
     print('C1 and poly1')
     shapeDist, t1, pt = _minDist2Poly(c1, poly1)
-    print(f'Shape Dist: {shapeDist}, t1: {t1}, pt: {pt}')
+    print('Shape Dist: {}, t1: {}, pt: {}'.format(shapeDist, t1, pt))
     ax2 = c1.plot()
     plotPoly(poly1, ax2)
     plt.plot(np.array((c1(t1)[0], pt[0])),

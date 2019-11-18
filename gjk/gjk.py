@@ -250,8 +250,8 @@ def gjkNew(poly1, poly2, maxIter=128, verbose=False):
 
         simplex, direction = doSimplex(poly1, poly2, simplex, direction)
         if verbose:
-            print(f'Iter: {_}, Direction: {direction}\n'
-                  f'  --> Simplex: {simplex}')
+            print('Iter: {}, Direction: {}\n'
+                  '  --> Simplex: {}').format(_, direction, simplex)
 
         if 'collision' in simplex.keys():
             return 0, ()
