@@ -40,10 +40,10 @@ class BezierParams:
     :type cpts: numpy.ndarray or None
     :param tau: Values at which to evaluate the Bezier curve.
     :type tau: numpy.ndarray or None
+    :param t0: Initial time of the Bezier curve trajectory.
+    :type t0: float
     :param tf: Final time of the Bezier curve trajectory.
     :type tf: float
-    :param fastInit: If true, init skips data type checks.
-    "type fastInit: bool
     """
     splitCache = defaultdict(dict)
     elevationMatrixCache = defaultdict(dict)
@@ -51,26 +51,25 @@ class BezierParams:
     diffMatrixCache = defaultdict(dict)
     bezCoefCache = dict()
 
-    def __init__(self, cpts=None, tau=None, tf=1.0, fastInit=False):
-        self._tau = tau
-        self._tf = float(tf)
+    def __init__(self, cpts=None, tau=None, t0=0.0, tf=1.0):
         self._curve = None
 
         if cpts is not None:
-            # Checking to see if the cpts are in the desired format. If they
-            # are, don't call np.array since it causes a bottleneck in certain
-            # iterative procedures.
-            if (isinstance(cpts, np.ndarray) and
-                    cpts.dtype == 'float64' and
-                    cpts.ndim == 2):
-                self._cpts = cpts
-            else:
-                self._cpts = np.array(cpts, ndmin=2, dtype=float)
+            self._cpts = cpts
             self._dim = self._cpts.shape[0]
             self._deg = self._cpts.shape[1] - 1
         else:
             self._dim = None
             self._deg = None
+
+        if tau is not None:
+            self._t0 = tau[0]
+            self._tf = tau[-1]
+        else:
+            self._t0 = float(t0)
+            self._tf = float(tf)
+
+        self._tau = tau
 
     @property
     def cpts(self):
@@ -108,6 +107,15 @@ class BezierParams:
         return self._dim
 
     @property
+    def t0(self):
+        return self._t0
+
+    @t0.setter
+    def t0(self, value):
+        self._t0 = float(value)
+        self._tau = None
+
+    @property
     def tf(self):
         return self._tf
 
@@ -119,7 +127,7 @@ class BezierParams:
     @property
     def tau(self):
         if self._tau is None:
-            self._tau = np.linspace(0, self._tf, 1001)
+            self._tau = np.linspace(self._t0, self._tf, 1001)
         elif not isinstance(self._tau, np.ndarray):
             self._tau = np.array(self._tau)
         return self._tau
@@ -127,29 +135,30 @@ class BezierParams:
     @tau.setter
     def tau(self, val):
         self._curve = None
+        self._t0 = val[0]
         self._tf = val[-1]
-        self._tau = val
+        self._tau = np.array(val)
 
 
 class Bezier(BezierParams):
     """Bezier curve for trajectory generation
 
-    Allows the user to construct Bezier curves of arbitrary dimension and
-    degrees.
+    Allows the user to construct a Bezier curve of arbitrary dimension and
+    degree.
 
     :param cpts: Control points used to define the Bezier curve. The degree of
         the Bezier curve is equal to the number of columns -1. The dimension of
         the curve is equal to the number of rows.
     :type cpts: numpy.ndarray or None
-    :param tau: Values at which to evaluate the Bezier curve.
-    :type tau: numpy.ndarray or None
+    :param t0: Initial time of the Bezier curve trajectory.
+    :type t0: float
     :param tf: Final time of the Bezier curve trajectory.
     :type tf: float
 
     """
 
-    def __init__(self, cpts=None, tau=None, tf=1.0):
-        super().__init__(cpts=cpts, tau=tau, tf=tf)
+    def __init__(self, cpts=None, t0=0.0, tf=1.0):
+        super().__init__(cpts=cpts, t0=t0, tf=tf)
 
     def __add__(self, curve):
         return self.add(curve)
@@ -167,16 +176,8 @@ class Bezier(BezierParams):
         pass
 
     def __repr__(self):
-        return 'Bezier({}, {}, {})'.format(self.cpts, self.tau, self.tf)
-
-#    def __call__(self, t):
-#        """Calling the curve returns a single value at the passed in t value
-#        """
-#        pt = np.empty((self.dim, 1))
-#        for i, pts in enumerate(self.cpts):
-#            pt[i] = deCasteljauCurve(pts, np.array([t]), self.tf)
-#
-#        return pt
+        return 'Bezier({}, {}, {}, {})'.format(self.cpts, self.tau, self.t0,
+                                               self.tf)
 
     def __call__(self, t):
         """Calling the object returns the values of the curve at the t values
@@ -192,13 +193,14 @@ class Bezier(BezierParams):
         tau = np.atleast_1d(t)
         curve = np.empty((self.dim, tau.size))
         for i, pts in enumerate(self.cpts):
-            curve[i] = deCasteljauCurve(pts, tau, self.tf)
+            curve[i] = deCasteljauCurve(pts, tau, self.t0, self.tf)
 
         return curve
 
     @property
     def x(self):
-        """
+        """Convenience function to return only the X dimension of the curve
+
         Returns a Bezier object whose control points are the 0th row of the
         original object's control points.
         """
@@ -206,7 +208,8 @@ class Bezier(BezierParams):
 
     @property
     def y(self):
-        """
+        """Convenience function to return only the Y dimension of the curve
+
         Returns a Bezier object whose control points are the 1st row of the
         original object's control points. If the original object is less than
         2 dimensions, this returns None.
@@ -218,7 +221,8 @@ class Bezier(BezierParams):
 
     @property
     def z(self):
-        """
+        """Convenience function to return only the Z dimension of the curve
+
         Returns a Bezier object whose control points are the 2nd row of the
         original object's control points. If the original object is less than
         3 dimensions, this returns None.
@@ -230,13 +234,25 @@ class Bezier(BezierParams):
 
     @property
     def curve(self):
-#        if self._tau is None:
-#            self._tau = np.arange(0, 1.01, 0.01)
+        """Returns the curve computed at each value of Tau.
 
+        This function will use the De Casteljau algorithm to find the value of
+        the curve at each value found within Tau \in [t0, tf]. Note that by
+        default Tau is computed by np.linspace(t0, tf, 1001). This function
+        will also cache the curve for future use to avoid computing the curve
+        multiple times.
+
+        The computation of the curve uses the De Casteljau algorithm rather
+        than the definition of Bernstein polynomials due to roundoff errors for
+        high order curves. While Bernstein polynomials exhibit numerical
+        stability, Python will not properly handle values to the power of large
+        numbers.
+        """
         if self._curve is None:
             self._curve = np.zeros([self.dim, len(self.tau)])
             for i, pts in enumerate(self.cpts):
-                self._curve[i] = deCasteljauCurve(pts, self.tau, self.tf)
+                self._curve[i] = deCasteljauCurve(pts, self.tau, self.t0,
+                                                  self.tf)
 
         return self._curve
 
@@ -246,8 +262,7 @@ class Bezier(BezierParams):
         :return: Deep copy of Bezier object
         :rtype: Bezier
         """
-        return Bezier(self.cpts, self.tau, self.tf)
-#        return Bezier(self.cpts, None, self.tf)
+        return Bezier(self.cpts, self.t0, self.tf)
 
     def plot(self, axisHandle=None, showCpts=True, **kwargs):
         """Plots the Bezier curve in 1D or 2D
@@ -298,6 +313,9 @@ class Bezier(BezierParams):
     def add(self, other):
         """Adds two Bezier curves
 
+        This function will automatically check to make sure that the initial
+        and final times are aligned.
+
         Paper Reference: Property 7: Arithmetic Operations
 
         :param other: Other Bezier curve to be added
@@ -305,18 +323,23 @@ class Bezier(BezierParams):
         :return: Sum of the two Bezier curves
         :rtype: Bezier
         """
-        addedCpts = self.cpts + other.cpts
-        newCurve = self.copy()
-        newCurve.cpts = addedCpts
-        return newCurve
+        if self.t0 != other.t0 and self.tf != other.tf:
+            c1, c2 = _temporalAlignment(self, other)
+            cpts = c1.cpts + c2.cpts
+            t0 = c1.t0
+            tf = c1.tf
+        else:
+            cpts = self.cpts + other.cpts
+            t0 = self.t0
+            tf = self.tf
+
+        return Bezier(cpts, t0, tf)
 
     def sub(self, other):
         """Subtracts two Bezier curves
 
-        If the final times of the two curves do not match, the longer curve is
-        split at the final time of the shorter curve. The resulting curve will
-        have a final time equal to that of the shorter curve. Note that the
-        initial time is always assumed to be 0 for Bezier objects.
+        This function will automatically check to make sure that the initial
+        and final times are aligned.
 
         Paper Reference: Property 7: Arithmetic Operations
 
@@ -325,26 +348,38 @@ class Bezier(BezierParams):
         :return: Original curve - Other curve
         :rtype: Bezier
         """
-        if self.tf == other.tf:
-            subCpts = self.cpts - other.cpts
-            newCurve = self.copy()
-
-        elif self.tf > other.tf:
-            tsplit = other.tf
-            tempCurve, _ = self.split(tsplit)
-            subCpts = tempCurve.cpts - other.cpts
-            newCurve = tempCurve.copy()
-            newCurve.tf = other.tf
-
+        if self.t0 != other.t0 and self.tf != other.tf:
+            c1, c2 = _temporalAlignment(self, other)
+            cpts = c1.cpts - c2.cpts
+            t0 = c1.t0
+            tf = c1.tf
         else:
-            tsplit = self.tf
-            tempCurve, _ = other.split(tsplit)
-            subCpts = self.cpts - tempCurve.cpts
-            newCurve = self.copy()
-            newCurve.tf = self.tf
+            cpts = self.cpts - other.cpts
+            t0 = self.t0
+            tf = self.tf
 
-        newCurve.cpts = subCpts
-        return newCurve
+        return Bezier(cpts, t0, tf)
+
+#        if self.tf == other.tf:
+#            subCpts = self.cpts - other.cpts
+#            newCurve = self.copy()
+#
+#        elif self.tf > other.tf:
+#            tsplit = other.tf
+#            tempCurve, _ = self.split(tsplit)
+#            subCpts = tempCurve.cpts - other.cpts
+#            newCurve = tempCurve.copy()
+#            newCurve.tf = other.tf
+#
+#        else:
+#            tsplit = self.tf
+#            tempCurve, _ = other.split(tsplit)
+#            subCpts = self.cpts - tempCurve.cpts
+#            newCurve = self.copy()
+#            newCurve.tf = self.tf
+#
+#        newCurve.cpts = subCpts
+#        return newCurve
 
     def mul(self, multiplicand):
         """Computes the product of two Bezier curves.
@@ -868,8 +903,45 @@ class RationalBezier(BezierParams):
         self._weights = np.array(weights, ndmin=2)
 
 
+def _temporalAlignment(c1, c2):
+    """Returns two curves that are temporally aligned (i.e. same t0 and tf)
+
+    :param c1: First curve to be aligned
+    :type c1: Bezier
+    :param c2: Second curve to be aligned
+    :type c2: Bezier
+    :return: Two curves whose control points are defined for the intersection
+        of time of c1 and c2. (i.e. t0 = max(c1.t0, c2.t0),
+        tf = min(c1.tf, c2.tf))
+    :rtype: (Bezier, Bezier)
+    """
+    newC1 = c1.copy()
+    newC2 = c2.copy()
+
+    if c1.t0 < c2.t0:
+        t0 = c2.t0
+        _, newC1 = newC1.split(t0)
+    elif c1.t0 > c2.t0:
+        t0 = c1.t0
+        _, newC2 = newC2.split(t0)
+
+    if c1.tf < c2.tf:
+        tf = c1.tf
+        newC2, _ = newC2.split(tf)
+    elif c1.tf > c2.tf:
+        tf = c2.tf
+        newC1, _ = newC1.split(tf)
+
+    newC1.t0 = t0
+    newC2.t0 = t0
+    newC1.tf = tf
+    newC2.tf = tf
+
+    return newC1, newC2
+
+
 @njit(cache=True)
-def deCasteljauCurve(cpts, tau, tf=1.0):
+def deCasteljauCurve(cpts, tau, t0=0.0, tf=1.0):
     """Returns a Bezier curve using the de Casteljau algorithm
 
     Uses the de Casteljau algorithm to generate the Bezier curve defined by
@@ -880,22 +952,23 @@ def deCasteljauCurve(cpts, tau, tf=1.0):
 
     :param cpts: Control points defining the 1D Bezier curve.
     :type cpts: numpy.ndarray(dtype=numpy.float64)
-    :param tau: Values at which to evaluate Bezier curve. Must be within the
-        range of [0,tf].
+    :param tau: Values at which to evaluate Bezier curve.
     :type tau: numpy.ndarray(dtype=numpy.float64)
-    :param tf: Final tau value for the 1D curve. Default is 1.0. Note that the
-        Bezier curve is defined on the range of [0, tf].
+    :param t0: Initial time of the curve. Default is 0.0.
+    :type t0: float
+    :param tf: Final time of the curve. Default is 1.0.
     :type tf: float
     :return: Numpy array of length tau of the Bezier curve evaluated at each
         value of tau.
     :rtype: numpy.ndarray(dtype=numpy.float64)
     """
-    tau = tau/tf
-    curveLen = tau.size
+    T = (tau - t0) / (tf - t0)
+
+    curveLen = T.size
     curve = np.empty(curveLen)
     curveIdx = 0
 
-    for t in tau:
+    for t in T:
         newCpts = cpts.copy()
         while newCpts.size > 1:
             cptsTemp = np.empty(newCpts.size-1)
