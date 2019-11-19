@@ -124,6 +124,15 @@ def animate3DTrajectory(trajectories):
 
 if __name__ == '__main__':
 #    plt.close('all')
+    plt.rcParams.update({
+        'font.size': 40,
+        'pdf.fonttype': 42,
+        'ps.fonttype': 42,
+        'xtick.labelsize': 40,
+        'ytick.labelsize': 40,
+        'lines.linewidth': 4,
+        'lines.markersize': 18
+        })
 
     img = CAS_IMG
     numVeh, initPts, finalPts = generatePointsFromImage(img)
@@ -141,13 +150,17 @@ if __name__ == '__main__':
 
     ineqCons = [{'type': 'ineq', 'fun': bezopt.temporalSeparationConstraints}]
 
+    _ = bez.Bezier(bezopt.reshapeVector(xGuess))
+    _.elev(10)
+    _ = _*_
+
     startTime = time.time()
     results = sop.minimize(
                 bezopt.objectiveFunction,
                 x0=xGuess,
                 method='SLSQP',
                 constraints=ineqCons,
-                options={'maxiter': 100,
+                options={'maxiter': 250,
                          'disp': True,
                          'iprint': 2}
                 )
@@ -172,6 +185,10 @@ if __name__ == '__main__':
         plt.plot([curve.cpts[0, -1]],
                  [curve.cpts[1, -1]],
                  [curve.cpts[2, -1]],
-                 'k.', markersize=50)
+                 'k.', markersize=80)
 
-    animate3DTrajectory(curves)
+    ax.set_xticks(np.arange(0, 11, 2))
+    ax.set_yticks(np.arange(0, 5, 2))
+    ax.set_zticks([0, 5, 10])
+
+#    animate3DTrajectory(curves)

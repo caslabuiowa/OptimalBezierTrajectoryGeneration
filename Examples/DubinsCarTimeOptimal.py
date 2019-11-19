@@ -56,11 +56,28 @@ def animateTrajectory(trajectories):
 
 
 if __name__ == '__main__':
-    plt.close('all')
+#    plt.close('all')
+    plt.rcParams.update({
+        'font.size': 40,
+        'pdf.fonttype': 42,
+        'ps.fonttype': 42,
+        'xtick.labelsize': 40,
+        'ytick.labelsize': 40,
+        'lines.linewidth': 4,
+        'lines.markersize': 18
+        })
 
     numVeh = 1
     dim = 2
     deg = 8
+    inipts = [#(0, 5),
+              (3, 0)]
+    finpts = [#(8, 4),
+              (7, 10)]
+    iniangs = [#0,
+               np.pi/2]
+    finangs = [#0,
+               np.pi/2]
     bezopt = BezOptimization(numVeh=numVeh,
                              dimension=dim,
                              degree=deg,
@@ -68,12 +85,12 @@ if __name__ == '__main__':
                              maxSep=1,
                              maxSpeed=5,
                              maxAngRate=1,
-                             initPoints=[(3, 0)],
-                             finalPoints=[(7, 10)],
+                             initPoints=inipts,
+                             finalPoints=finpts,
                              initSpeeds=[1]*numVeh,
                              finalSpeeds=[1]*numVeh,
-                             initAngs=[np.pi/2]*numVeh,
-                             finalAngs=[np.pi/2]*numVeh,
+                             initAngs=iniangs,
+                             finalAngs=finangs,
                              pointObstacles=[[3, 2], [6, 7]]
                              )
 
@@ -100,8 +117,10 @@ if __name__ == '__main__':
                 )
     endTime = time.time()
 
+    std = 1
     while not results.success:
-        xGuess = bezopt.generateGuess(std=1)
+        xGuess = bezopt.generateGuess(std=std)
+        std += 1
         startTime = time.time()
         print('starting again')
         results = sop.minimize(
@@ -114,6 +133,8 @@ if __name__ == '__main__':
                              'iprint': 2}
                     )
         endTime = time.time()
+        if std > 100:
+            print('Solution not converging.')
 
     print('---')
     print('Computation Time: {}'.format(endTime - startTime))
@@ -134,8 +155,8 @@ if __name__ == '__main__':
     for i in range(numVeh):
         curves.append(bez.Bezier(cpts[i*dim:(i+1)*dim]))
     for curve in curves:
-        plt.plot(curve.curve[0], curve.curve[1], '-',
-                 curve.cpts[0], curve.cpts[1], '.--')
+        plt.plot(curve.curve[0], curve.curve[1], '-', label='Elevated by 100')
+#        plt.plot(curve.cpts[0], curve.cpts[1], '.--')
 
     obstacle1 = plt.Circle(bezopt.pointObstacles[0],
                            radius=maxSep,
@@ -149,8 +170,11 @@ if __name__ == '__main__':
     ax.add_artist(obstacle2)
     plt.xlim([0, 10])
     plt.ylim([0, 10])
-    plt.title('Vehicle Trajectory', fontsize=28)
-    plt.xlabel('X Position', fontsize=20)
-    plt.ylabel('Y Position', fontsize=20)
+#    plt.title('Vehicle Trajectory', fontsize=28)
+    plt.xlabel('X Position')#, fontsize=20)
+    plt.ylabel('Y Position')#, fontsize=20)
 
     animateTrajectory(curves)
+
+    plt.show()
+    plt.rcParams.update(plt.rcParamsDefault)

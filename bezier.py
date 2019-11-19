@@ -18,7 +18,8 @@ from numba import njit, jit
 import numpy as np
 from scipy.special import binom
 
-from gjk.gjk import gjk
+from gjk.gjk import gjkNew
+#from gjk import gjkNew
 
 
 #TODO:
@@ -39,6 +40,8 @@ class BezierParams:
     :type cpts: numpy.ndarray or None
     :param tau: Values at which to evaluate the Bezier curve.
     :type tau: numpy.ndarray or None
+    :param t0: Initial time of the Bezier curve trajectory.
+    :type t0: float
     :param tf: Final time of the Bezier curve trajectory.
     :type tf: float
     """
@@ -48,29 +51,30 @@ class BezierParams:
     diffMatrixCache = defaultdict(dict)
     bezCoefCache = dict()
 
-    def __init__(self, cpts=None, tau=None, tf=1.0):
-        self._tau = tau
-        self._tf = float(tf)
+    def __init__(self, cpts=None, tau=None, t0=0.0, tf=1.0):
         self._curve = None
 
-#        if tau is None:
-#            self._tau = np.linspace(0, self._tf, 1001)
-
         if cpts is not None:
-            # Checking to see if the cpts are in the desired format. If they
-            # are, don't call np.array since it causes a bottleneck in certain
-            # iterative procedures.
-            if (isinstance(cpts, np.ndarray) and
-                    cpts.dtype == 'float64' and
-                    cpts.ndim == 2):
-                self._cpts = cpts
+            if cpts.ndim == 1:
+                self._cpts = np.atleast_2d(cpts)
+                self._dim = 1
+                self._deg = cpts.size
             else:
-                self._cpts = np.array(cpts, ndmin=2, dtype=float)
-            self._dim = self._cpts.shape[0]
-            self._deg = self._cpts.shape[1] - 1
+                self._cpts = cpts
+                self._dim = self._cpts.shape[0]
+                self._deg = self._cpts.shape[1] - 1
         else:
             self._dim = None
             self._deg = None
+
+        if tau is not None:
+            self._t0 = tau[0]
+            self._tf = tau[-1]
+        else:
+            self._t0 = float(t0)
+            self._tf = float(tf)
+
+        self._tau = tau
 
     @property
     def cpts(self):
@@ -108,6 +112,15 @@ class BezierParams:
         return self._dim
 
     @property
+    def t0(self):
+        return self._t0
+
+    @t0.setter
+    def t0(self, value):
+        self._t0 = float(value)
+        self._tau = None
+
+    @property
     def tf(self):
         return self._tf
 
@@ -119,7 +132,7 @@ class BezierParams:
     @property
     def tau(self):
         if self._tau is None:
-            self._tau = np.linspace(0, self._tf, 1001)
+            self._tau = np.linspace(self._t0, self._tf, 1001)
         elif not isinstance(self._tau, np.ndarray):
             self._tau = np.array(self._tau)
         return self._tau
@@ -127,29 +140,30 @@ class BezierParams:
     @tau.setter
     def tau(self, val):
         self._curve = None
+        self._t0 = val[0]
         self._tf = val[-1]
-        self._tau = val
+        self._tau = np.array(val)
 
 
 class Bezier(BezierParams):
     """Bezier curve for trajectory generation
 
-    Allows the user to construct Bezier curves of arbitrary dimension and
-    degrees.
+    Allows the user to construct a Bezier curve of arbitrary dimension and
+    degree.
 
     :param cpts: Control points used to define the Bezier curve. The degree of
         the Bezier curve is equal to the number of columns -1. The dimension of
         the curve is equal to the number of rows.
     :type cpts: numpy.ndarray or None
-    :param tau: Values at which to evaluate the Bezier curve.
-    :type tau: numpy.ndarray or None
+    :param t0: Initial time of the Bezier curve trajectory.
+    :type t0: float
     :param tf: Final time of the Bezier curve trajectory.
     :type tf: float
 
     """
 
-    def __init__(self, cpts=None, tau=None, tf=1.0):
-        super().__init__(cpts=cpts, tau=tau, tf=tf)
+    def __init__(self, cpts=None, t0=0.0, tf=1.0):
+        super().__init__(cpts=cpts, t0=t0, tf=tf)
 
     def __add__(self, curve):
         return self.add(curve)
@@ -160,18 +174,38 @@ class Bezier(BezierParams):
     def __mul__(self, curve):
         return self.mul(curve)
 
-    def __div__(self, curve):
+    def __truediv__(self, curve):
         return self.div(curve)
 
     def __pow__(self, power):
         pass
 
     def __repr__(self):
-        return 'Bezier({}, {}, {})'.format(self.cpts, self.tau, self.tf)
+        return 'Bezier({}, {}, {}, {})'.format(self.cpts, self.tau, self.t0,
+                                               self.tf)
+
+    def __call__(self, t):
+        """Calling the object returns the values of the curve at the t values
+
+        Note that unlike the curve property, this will NOT cache the computed
+        values. This is meant to be a convenience function to quickly peek at
+        the values of the curve.
+
+        :param t: Single value or numpy array of values at which to compute the
+            curve.
+        :type t: float or numpy.ndarray
+        """
+        tau = np.atleast_1d(t)
+        curve = np.empty((self.dim, tau.size))
+        for i, pts in enumerate(self.cpts):
+            curve[i] = deCasteljauCurve(pts, tau, self.t0, self.tf)
+
+        return curve
 
     @property
     def x(self):
-        """
+        """Convenience function to return only the X dimension of the curve
+
         Returns a Bezier object whose control points are the 0th row of the
         original object's control points.
         """
@@ -179,7 +213,8 @@ class Bezier(BezierParams):
 
     @property
     def y(self):
-        """
+        """Convenience function to return only the Y dimension of the curve
+
         Returns a Bezier object whose control points are the 1st row of the
         original object's control points. If the original object is less than
         2 dimensions, this returns None.
@@ -191,7 +226,8 @@ class Bezier(BezierParams):
 
     @property
     def z(self):
-        """
+        """Convenience function to return only the Z dimension of the curve
+
         Returns a Bezier object whose control points are the 2nd row of the
         original object's control points. If the original object is less than
         3 dimensions, this returns None.
@@ -203,13 +239,25 @@ class Bezier(BezierParams):
 
     @property
     def curve(self):
-        if self._tau is None:
-            self._tau = np.arange(0, 1.01, 0.01)
+        """Returns the curve computed at each value of Tau.
 
+        This function will use the De Casteljau algorithm to find the value of
+        the curve at each value found within Tau \in [t0, tf]. Note that by
+        default Tau is computed by np.linspace(t0, tf, 1001). This function
+        will also cache the curve for future use to avoid computing the curve
+        multiple times.
+
+        The computation of the curve uses the De Casteljau algorithm rather
+        than the definition of Bernstein polynomials due to roundoff errors for
+        high order curves. While Bernstein polynomials exhibit numerical
+        stability, Python will not properly handle values to the power of large
+        numbers.
+        """
         if self._curve is None:
             self._curve = np.zeros([self.dim, len(self.tau)])
             for i, pts in enumerate(self.cpts):
-                self._curve[i] = deCasteljauCurve(pts, self.tau, self.tf)
+                self._curve[i] = deCasteljauCurve(pts, self.tau, self.t0,
+                                                  self.tf)
 
         return self._curve
 
@@ -219,8 +267,7 @@ class Bezier(BezierParams):
         :return: Deep copy of Bezier object
         :rtype: Bezier
         """
-#        return Bezier(self.cpts, self.tau, self.tf)
-        return Bezier(self.cpts, None, self.tf)
+        return Bezier(self.cpts, self.t0, self.tf)
 
     def plot(self, axisHandle=None, showCpts=True, **kwargs):
         """Plots the Bezier curve in 1D or 2D
@@ -252,7 +299,7 @@ class Bezier(BezierParams):
             if showCpts:
                 ax.plot(np.linspace(0, self.tf, self.deg+1),
                         self.cpts.squeeze(), '.--')
-        elif self.dim == 2:
+        elif self.dim == 2 or (self.cpts[2, :] == 0).all():
             ax.plot(self.curve[0], self.curve[1], **kwargs)
             if showCpts:
                 ax.plot(cpts[0], cpts[1], '.--')
@@ -271,6 +318,9 @@ class Bezier(BezierParams):
     def add(self, other):
         """Adds two Bezier curves
 
+        This function will automatically check to make sure that the initial
+        and final times are aligned.
+
         Paper Reference: Property 7: Arithmetic Operations
 
         :param other: Other Bezier curve to be added
@@ -278,13 +328,23 @@ class Bezier(BezierParams):
         :return: Sum of the two Bezier curves
         :rtype: Bezier
         """
-        addedCpts = self.cpts + other.cpts
-        newCurve = self.copy()
-        newCurve.cpts = addedCpts
-        return newCurve
+        if self.t0 != other.t0 and self.tf != other.tf:
+            c1, c2 = _temporalAlignment(self, other)
+            cpts = c1.cpts + c2.cpts
+            t0 = c1.t0
+            tf = c1.tf
+        else:
+            cpts = self.cpts + other.cpts
+            t0 = self.t0
+            tf = self.tf
+
+        return Bezier(cpts, t0, tf)
 
     def sub(self, other):
         """Subtracts two Bezier curves
+
+        This function will automatically check to make sure that the initial
+        and final times are aligned.
 
         Paper Reference: Property 7: Arithmetic Operations
 
@@ -293,10 +353,38 @@ class Bezier(BezierParams):
         :return: Original curve - Other curve
         :rtype: Bezier
         """
-        subCpts = self.cpts - other.cpts
-        newCurve = self.copy()
-        newCurve.cpts = subCpts
-        return newCurve
+        if self.t0 != other.t0 and self.tf != other.tf:
+            c1, c2 = _temporalAlignment(self, other)
+            cpts = c1.cpts - c2.cpts
+            t0 = c1.t0
+            tf = c1.tf
+        else:
+            cpts = self.cpts - other.cpts
+            t0 = self.t0
+            tf = self.tf
+
+        return Bezier(cpts, t0, tf)
+
+#        if self.tf == other.tf:
+#            subCpts = self.cpts - other.cpts
+#            newCurve = self.copy()
+#
+#        elif self.tf > other.tf:
+#            tsplit = other.tf
+#            tempCurve, _ = self.split(tsplit)
+#            subCpts = tempCurve.cpts - other.cpts
+#            newCurve = tempCurve.copy()
+#            newCurve.tf = other.tf
+#
+#        else:
+#            tsplit = self.tf
+#            tempCurve, _ = other.split(tsplit)
+#            subCpts = self.cpts - tempCurve.cpts
+#            newCurve = self.copy()
+#            newCurve.tf = self.tf
+#
+#        newCurve.cpts = subCpts
+#        return newCurve
 
     def mul(self, multiplicand):
         """Computes the product of two Bezier curves.
@@ -370,16 +458,18 @@ class Bezier(BezierParams):
         :rtype: RationalBezier
         """
         if not isinstance(denominator, Bezier):
-            msg = ('The denominator must be a Bezier object, not a %s. '
+            msg = ('The denominator must be a Bezier object, not a {}. '
                    'Or the module has been reloaded.').format(
                            type(denominator))
             raise TypeError(msg)
 
         cpts = np.empty((self.dim, self.deg+1))
-        for i in range(self.dim+1):
-            for j in range(self.deg+2):
+        for i in range(self.dim):
+            for j in range(self.deg+1):
                 if self.cpts[i, j] == 0:
                     cpts[i, j] = 0
+                elif denominator.cpts[i, j] == 0:
+                    cpts[i, j] = np.inf
                 else:
                     cpts[i, j] = self.cpts[i, j] / denominator.cpts[i, j]
 
@@ -469,23 +559,84 @@ class Bezier(BezierParams):
         :return: Tuple of curves. One before the split point and one after.
         :rtype: tuple(Bezier, Bezier)
         """
+        c1 = self.copy()
+        c2 = self.copy()
+
         cpts1 = []
         cpts2 = []
+
+        if np.isnan(tDiv):
+            print('[!] Warning, tDiv is {}, changing to 0.'.format(tDiv))
+            tDiv = 0
 
         for d in range(self.dim):
             left, right = deCasteljauSplit(self.cpts[d, :], tDiv, self.tf)
             cpts1.append(left)
-            cpts2.append(right)
-
-        c1 = self.copy()
-        c2 = self.copy()
+            cpts2.append(right[::-1])
 
         c1.cpts = cpts1
         c2.cpts = cpts2
 
         return c1, c2
 
-    def min(self, dim=0, tol=1e-6, maxIter=1000):
+#    def min(self, dim=0, tol=1e-6, maxIter=1000):
+#        """Returns the minimum value of the Bezier curve in a single dimension
+#
+#        Finds the minimum value of the Bezier curve. This is done by first
+#        checking the first and last control points since the first and last
+#        point lie on the curve. If the first or last control point is not the
+#        minimum value, the curve is split at the lowest control point. The new
+#        minimum value is then defined as the lowest control point of the two
+#        new curves. This continues until the difference between the new minimum
+#        and old minimum values is within the desired tolerance.
+#
+#        :param dim: Which dimension to return the minimum of.
+#        :type dim: int
+#        :param tol: Tolerance of the minimum value.
+#        :type tol: float
+#        :param maxIter: Maximum number of iterations to search for the minimum.
+#        :type maxIter: int
+#        :return: Minimum value of the Bezier curve. None if maximum iterations
+#            is met.
+#        :rtype: float or None
+#        """
+#        minVal = min(self.cpts[dim, :])
+#        tol = np.abs(tol*np.mean(self.cpts))
+#
+#        if self.cpts[dim, 0] == minVal:
+#            return self.cpts[dim, 0]
+#
+#        elif self.cpts[dim, -1] == minVal:
+#            return self.cpts[dim, -1]
+#
+#        else:
+#            lastMin = np.inf
+#            newCurve = self.copy()
+#            for _ in range(maxIter):
+#                splitPoint = (np.argmin(newCurve.cpts[dim, :])
+#                              / (newCurve.deg+1.0))
+#                c1, c2 = newCurve.split(splitPoint)
+#
+#                min1 = min(c1.cpts[dim, :])
+#                min2 = min(c2.cpts[dim, :])
+#
+#                if min1 < min2:
+#                    newCurve = c1
+#                    newMin = min1
+#
+#                else:
+#                    newCurve = c2
+#                    newMin = min2
+#
+#                if np.abs(newMin-lastMin) < tol:
+#                    return newMin
+#                else:
+#                    lastMin = newMin
+#
+#            print('Maximum number of iterations met')
+#            return None
+
+    def min(self, dim=0, globMin=-np.inf, tol=1e-6):
         """Returns the minimum value of the Bezier curve in a single dimension
 
         Finds the minimum value of the Bezier curve. This is done by first
@@ -506,41 +657,22 @@ class Bezier(BezierParams):
             is met.
         :rtype: float or None
         """
-        minVal = min(self.cpts[dim, :])
-        tol = np.abs(tol*np.mean(self.cpts))
+        minIdx = np.argmin(self.cpts[dim, :])
+        newMin = min(self.cpts[dim, :])
 
-        if self.cpts[dim, 0] == minVal:
-            return self.cpts[dim, 0]
+        error = np.abs(globMin-newMin)
 
-        elif self.cpts[dim, -1] == minVal:
-            return self.cpts[dim, -1]
+        if error < tol:
+            return newMin
+        elif minIdx != 0 and minIdx != self.deg:
+            splitPoint = minIdx / self.deg
+            c1, c2 = self.split(splitPoint)
+            c1min = c1.min(dim=dim, globMin=newMin, tol=tol)
+            c2min = c2.min(dim=dim, globMin=newMin, tol=tol)
 
-        else:
-            lastMin = np.inf
-            newCurve = self.copy()
-            for _ in range(maxIter):
-                splitPoint = (np.argmin(newCurve.cpts[dim, :])
-                              / (newCurve.deg+1.0))
-                c1, c2 = newCurve.split(splitPoint)
+            newMin = min((c1min, c2min))
 
-                min1 = min(c1.cpts[dim, :])
-                min2 = min(c2.cpts[dim, :])
-
-                if min1 < min2:
-                    newCurve = c1
-                    newMin = min1
-
-                else:
-                    newCurve = c2
-                    newMin = min2
-
-                if np.abs(newMin-lastMin) < tol:
-                    return newMin
-                else:
-                    lastMin = newMin
-
-            print('Maximum number of iterations met')
-            return None
+        return newMin
 
 #    def max4(self, dim=0, tol=1e-6, maxIter=1000):
 #        """Returns the maximum value of the Bezier curve in a single dimension
@@ -624,7 +756,7 @@ class Bezier(BezierParams):
         maxIdx = np.argmax(self.cpts[dim, :])
         newMax = max(self.cpts[dim, :])
 
-        error = np.abs(globMax-newMax) / newMax
+        error = np.abs(globMax-newMax)
 
         if error < tol:
             return newMax
@@ -716,11 +848,31 @@ class Bezier(BezierParams):
     def minDist(self, otherCurve):
         """
         """
-        if self.dim != 2 or otherCurve.dim != 2:
-            err = ('Both curves must be 2D only, not {} and {}.'
+#        if self.dim != 2 or otherCurve.dim != 2:
+#            err = ('Both curves must be 2D only, not {} and {}.'
+#                   ).format(self.dim, otherCurve.dim)
+#            raise ValueError(err)
+        if (self.dim < 2 or self.dim > 3 or
+                otherCurve.dim < 2 or otherCurve.dim > 3):
+            err = ('Both curves must be either 2D or 3D, not {}D and {}D.'
                    ).format(self.dim, otherCurve.dim)
             raise ValueError(err)
         return _minDist(self, otherCurve)
+
+    def minDist2Poly(self, poly):
+        """
+        """
+        return _minDist2Poly(self, poly)
+
+    def collCheck(self, otherCurve):
+        """
+        """
+        return _collCheckBez2Bez(self, otherCurve)
+
+    def collCheck2Poly(self, poly):
+        """
+        """
+        return _collCheckBez2Poly(self, poly)
 
     def normSquare(self):
         """Calculates the norm squared of the Bezier curve
@@ -737,7 +889,7 @@ class Bezier(BezierParams):
             prodM = prodMatrix(self.deg).T
             Bezier.productMatrixCache[self.deg][self.deg] = prodM
 
-        normCpts = _normSquare(self.cpts, 1, self.dim, prodM.T)
+        normCpts = _normSquare(self.cpts, 1, self.dim, prodM.T)/2
 
         newCurve = self.copy()
         newCurve.cpts = normCpts
@@ -756,8 +908,45 @@ class RationalBezier(BezierParams):
         self._weights = np.array(weights, ndmin=2)
 
 
+def _temporalAlignment(c1, c2):
+    """Returns two curves that are temporally aligned (i.e. same t0 and tf)
+
+    :param c1: First curve to be aligned
+    :type c1: Bezier
+    :param c2: Second curve to be aligned
+    :type c2: Bezier
+    :return: Two curves whose control points are defined for the intersection
+        of time of c1 and c2. (i.e. t0 = max(c1.t0, c2.t0),
+        tf = min(c1.tf, c2.tf))
+    :rtype: (Bezier, Bezier)
+    """
+    newC1 = c1.copy()
+    newC2 = c2.copy()
+
+    if c1.t0 < c2.t0:
+        t0 = c2.t0
+        _, newC1 = newC1.split(t0)
+    elif c1.t0 > c2.t0:
+        t0 = c1.t0
+        _, newC2 = newC2.split(t0)
+
+    if c1.tf < c2.tf:
+        tf = c1.tf
+        newC2, _ = newC2.split(tf)
+    elif c1.tf > c2.tf:
+        tf = c2.tf
+        newC1, _ = newC1.split(tf)
+
+    newC1.t0 = t0
+    newC2.t0 = t0
+    newC1.tf = tf
+    newC2.tf = tf
+
+    return newC1, newC2
+
+
 @njit(cache=True)
-def deCasteljauCurve(cpts, tau, tf=1.0):
+def deCasteljauCurve(cpts, tau, t0=0.0, tf=1.0):
     """Returns a Bezier curve using the de Casteljau algorithm
 
     Uses the de Casteljau algorithm to generate the Bezier curve defined by
@@ -768,22 +957,23 @@ def deCasteljauCurve(cpts, tau, tf=1.0):
 
     :param cpts: Control points defining the 1D Bezier curve.
     :type cpts: numpy.ndarray(dtype=numpy.float64)
-    :param tau: Values at which to evaluate Bezier curve. Must be within the
-        range of [0,tf].
+    :param tau: Values at which to evaluate Bezier curve.
     :type tau: numpy.ndarray(dtype=numpy.float64)
-    :param tf: Final tau value for the 1D curve. Default is 1.0. Note that the
-        Bezier curve is defined on the range of [0, tf].
+    :param t0: Initial time of the curve. Default is 0.0.
+    :type t0: float
+    :param tf: Final time of the curve. Default is 1.0.
     :type tf: float
     :return: Numpy array of length tau of the Bezier curve evaluated at each
         value of tau.
     :rtype: numpy.ndarray(dtype=numpy.float64)
     """
-    tau = tau/tf
-    curveLen = tau.size
+    T = (tau - t0) / (tf - t0)
+
+    curveLen = T.size
     curve = np.empty(curveLen)
     curveIdx = 0
 
-    for t in tau:
+    for t in T:
         newCpts = cpts.copy()
         while newCpts.size > 1:
             cptsTemp = np.empty(newCpts.size-1)
@@ -879,7 +1069,7 @@ def bezierCurve(cpts, tau, tf=1.0):
     return curve
 
 
-@jit(cache=True)
+@jit(cache=True, forceobj=True)
 def buildBezMatrix(n):
     """Builds a matrix of coefficients of the power basis to a Bernstein
     polynomial.
@@ -937,7 +1127,7 @@ def diffMatrix(n, tf=1.0):
     return Dm
 
 
-@jit(cache=True)
+#@jit(cache=True, forceobj=True)
 def elevMatrix(N, R=1):
     """Creates an elevation matrix for a Bezier curve.
 
@@ -961,7 +1151,7 @@ def elevMatrix(N, R=1):
     return T
 
 
-@jit(cache=True)
+@jit(cache=True, forceobj=True)
 def prodMatrix(N):
     """Produces a product matrix for obtaining the norm of a Bezier curve
 
@@ -993,7 +1183,7 @@ def prodMatrix(N):
 # TODO:
 #    Change this function name to prodM.
 #    Clean up and slightly change _normSquare to accommodate this change
-@jit(cache=True)
+#@jit(cache=True, forceobj=True)
 def bezProductCoefficients(m, n=None):
     """Produces a product matrix for obtaining the product of two Bezier curves
 
@@ -1022,7 +1212,7 @@ def bezProductCoefficients(m, n=None):
     return coefMat
 
 
-@jit(cache=True)
+@jit(cache=True, forceobj=True)
 def multiplyBezCurves(multiplier, multiplicand, coefMat=None):
     """Multiplies two Bezier curves together
 
@@ -1060,7 +1250,7 @@ def multiplyBezCurves(multiplier, multiplicand, coefMat=None):
     return np.dot(newMat, coefMat)
 
 
-@jit(cache=True)
+@jit(cache=True, forceobj=True)
 def splitCurveMat(deg, z, coefMat=None):
     """Creates matrices Q and Qp that are used to compute control points for a
         split curve.
@@ -1094,7 +1284,8 @@ def splitCurveMat(deg, z, coefMat=None):
     return Q, Qp
 
 
-def _minDist(c1, c2, cnt=0, alpha=np.inf, eps=1e-3):
+def _minDist(c1, c2, cnt=0, alpha=np.inf, eps=1e-9,
+             t1_l=0, t1_h=1, t2_l=0, t2_h=1):
     """
     Source: Computation of the minimum distance between two Bezier
     curves/surfaces
@@ -1103,47 +1294,389 @@ def _minDist(c1, c2, cnt=0, alpha=np.inf, eps=1e-3):
     y1 = c1.cpts[1, :]
     x2 = c2.cpts[0, :]
     y2 = c2.cpts[1, :]
-    poly1 = np.array(tuple(zip(x1, y1, [0]*x1.size)))
-    poly2 = np.array(tuple(zip(x2, y2, [0]*x1.size)))
+
+    if c1.dim == 3:
+        z1 = c1.cpts[2, :]
+    else:
+        z1 = [0]*x1.size
+
+    if c2.dim == 3:
+        z2 = c2.cpts[2, :]
+    else:
+        z2 = [0]*x1.size
+
+    c1 = Bezier([x1, y1, z1])
+    c2 = Bezier([x2, y2, z2])
+
+    poly1 = np.array(tuple(zip(x1, y1, z1)))
+    poly2 = np.array(tuple(zip(x2, y2, z2)))
 
     cnt += 1
-    if cnt > 10:
-        return -1
+    if cnt > 1000:
+        return (-1, -1, -1)
 
-    ub = _upperbound(c1.cpts, c2.cpts)
-    lb = gjk(poly1, poly2, maxIter=10)
+    flag, info = gjkNew(poly1, poly2)
+    if flag > 0:
+        closest1 = info[0]
+        closest2 = info[1]
+        lb = info[2]
+
+        # Check to see if the closest point on the shape is a control point
+        p1idx = np.where((poly1 == closest1).all(axis=1))[0]
+        p2idx = np.where((poly2 == closest2).all(axis=1))[0]
+        if p1idx.size > 0:
+            t1 = p1idx[0]/c1.deg
+
+        # If the closest point is not a control point, find t by weighting all
+        # the control points by their distance from the closest point
+        else:
+            eucDist1 = np.linalg.norm(closest1-c1.cpts.T, axis=1)
+            N = eucDist1.size
+            W = np.empty(N)
+            for i in range(N):
+                W[i] = 1 / (1 +
+                            (eucDist1[i]/eucDist1[:i]).sum() +
+                            (eucDist1[i]/eucDist1[i+1:]).sum())
+
+            t1 = (W*range(N)/N).sum()
+
+        if p2idx.size > 0:
+            t2 = p2idx[0]/c2.deg
+
+        else:
+            eucDist2 = np.linalg.norm(closest2-c2.cpts.T, axis=1)
+            N = eucDist2.size
+            W = np.empty(N)
+            for i in range(N):
+                W[i] = 1 / (1 +
+                            (eucDist2[i]/eucDist2[:i]).sum() +
+                            (eucDist2[i]/eucDist2[i+1:]).sum())
+
+            t2 = (W*range(N)/N).sum()
+
+    else:
+        t1 = 0.5
+        t2 = 0.5
+        lb = eps
+
+    t1len = t1_h - t1_l
+    t2len = t2_h - t2_l
+
+    ub, t1local, t2local = _upperbound(c1.cpts, c2.cpts)
 
     if ub <= alpha:
         alpha = ub
+        newT1 = (1-t1local)*t1_l + t1local*t1_h
+        newT2 = (1-t2local)*t2_l + t2local*t2_h
+    else:
+        newT1 = -1
+        newT2 = -1
+
+    retval = (alpha, newT1, newT2)
 
     if lb >= alpha*(1-eps):
-        return alpha
-    else:
-        c3, c4 = c1.split(0.5)
-        c5, c6 = c2.split(0.5)
-        alpha = min(alpha, _minDist(c3, c5, cnt=cnt, alpha=alpha))
-        alpha = min(alpha, _minDist(c3, c6, cnt=cnt, alpha=alpha))
-        alpha = min(alpha, _minDist(c4, c5, cnt=cnt, alpha=alpha))
-        alpha = min(alpha, _minDist(c4, c6, cnt=cnt, alpha=alpha))
+        return retval
 
-    return alpha
+    else:
+        c3, c4 = c1.split(t1)
+        c5, c6 = c2.split(t2)
+
+        newAlpha, newT1, newT2 = _minDist(c3, c5, cnt=cnt, alpha=retval[0],
+                                          t1_l=t1_l, t1_h=t1_l+t1*t1len,
+                                          t2_l=t2_l, t2_h=t2_l+t2*t2len)
+
+        if newAlpha < retval[0]:
+            retval = (newAlpha, newT1, newT2)
+
+        newAlpha, newT1, newT2 = _minDist(c3, c6, cnt=cnt, alpha=retval[0],
+                                          t1_l=t1_l, t1_h=t1_l+t1*t1len,
+                                          t2_l=t2_l+t2*t2len, t2_h=t2_h)
+
+        if newAlpha < retval[0]:
+            retval = (newAlpha, newT1, newT2)
+
+        newAlpha, newT1, newT2 = _minDist(c4, c5, cnt=cnt, alpha=retval[0],
+                                          t1_l=t1_l+t1*t1len, t1_h=t1_h,
+                                          t2_l=t2_l, t2_h=t2_l+t2*t2len)
+
+        if newAlpha < retval[0]:
+            retval = (newAlpha, newT1, newT2)
+
+        newAlpha, newT1, newT2 = _minDist(c4, c6, cnt=cnt, alpha=retval[0],
+                                          t1_l=t1_l+t1*t1len, t1_h=t1_h,
+                                          t2_l=t2_l+t2*t2len, t2_h=t2_h)
+
+        if newAlpha < retval[0]:
+            retval = (newAlpha, newT1, newT2)
+
+    return retval
+
+
+def _minDist2Poly(c1, poly2, cnt=0, alpha=np.inf, eps=1e-6, t1_l=0, t1_h=1):
+    """Similar to _minDist but finds the distance between a curve and a polygon
+    """
+    x1 = c1.cpts[0, :]
+    y1 = c1.cpts[1, :]
+
+    if c1.dim == 3:
+        z1 = c1.cpts[2, :]
+    else:
+        z1 = [0]*x1.size
+
+    c1 = Bezier([x1, y1, z1])
+
+    poly1 = np.array(tuple(zip(x1, y1, z1)))
+    poly2 = poly2.astype(float)
+
+    cnt += 1
+    if cnt > 1000:
+        return (-1, -1, -1)
+
+    flag, info = gjkNew(poly1, poly2)
+    if flag > 0:
+        closest1 = info[0]
+        closest2 = info[1]
+        lb = info[2]
+
+        # Check to see if the closest point on the shape is a control point
+        p1idx = np.where((poly1 == closest1).all(axis=1))[0]
+        if p1idx.size > 0:
+            t1 = p1idx[0]/c1.deg
+
+        # If the closest point is not a control point, find t by weighting all
+        # the control points by their distance from the closest point
+        else:
+            eucDist1 = np.linalg.norm(closest1-c1.cpts.T, axis=1)
+            N = eucDist1.size
+            W = np.empty(N)
+            for i in range(N):
+                W[i] = 1 / (1 +
+                            (eucDist1[i]/eucDist1[:i]).sum() +
+                            (eucDist1[i]/eucDist1[i+1:]).sum())
+
+            t1 = (W*range(N)/N).sum()
+
+        # Upper bound check
+        ub, t1local = _upperboundPoly(c1.cpts, closest2)
+        if ub <= alpha:
+            alpha = ub
+            newT1 = (1-t1local)*t1_l + t1local*t1_h
+        else:
+            newT1 = -1
+
+    else:
+        t1 = 0.5
+        newT1 = -1
+        closest2 = -1
+        lb = eps**3
+        ub = np.inf
+
+    t1len = t1_h - t1_l
+
+    retval = (alpha, newT1, closest2)
+
+    if lb >= alpha*(1-eps):
+        return retval
+
+    else:
+        c3, c4 = c1.split(t1)
+
+        newAlpha, newT1, closest2 = _minDist2Poly(c3, poly2, cnt=cnt,
+                                                  alpha=retval[0],
+                                                  t1_l=t1_l,
+                                                  t1_h=t1_l+t1*t1len)
+
+        if newAlpha < retval[0]:
+            retval = (newAlpha, newT1, closest2)
+
+        newAlpha, newT1, closest2 = _minDist2Poly(c4, poly2, cnt=cnt,
+                                                  alpha=retval[0],
+                                                  t1_l=t1_l+t1*t1len,
+                                                  t1_h=t1_h)
+
+        if newAlpha < retval[0]:
+            retval = (newAlpha, newT1, closest2)
+
+    return retval
 
 
 @njit(cache=True)
 def _upperbound(c1, c2):
+    """
+    """
     distances = np.empty(4)
+    tvals = np.array([(0., 0.),
+                      (0., 1.),
+                      (1., 0.),
+                      (1., 1.)])
 
     distances[0] = _norm(c1[:, 0] - c2[:, 0])
     distances[1] = _norm(c1[:, 0] - c2[:, -1])
     distances[2] = _norm(c1[:, -1] - c2[:, 0])
     distances[3] = _norm(c1[:, -1] - c2[:, -1])
 
-    return distances.min()
+    t1, t2 = tvals[distances.argmin()]
+
+    return distances.min(), t1, t2
+
+
+#@njit(cache=True)
+#def _upperboundPoly(c1, poly):
+#    """
+#    """
+#    distances = np.empty(2*poly.shape[0])
+#    tvals = np.array((0., 1.))
+#
+#    for i in range(poly.shape[0]):
+#        distances[2*i] = _norm(c1[:, 0] - poly[i])
+#        distances[2*i+1] = _norm(c1[:, -1] - poly[i])
+#
+#    t1 = tvals[distances.argmin() % 2]
+#
+#    return distances.min(), t1
+
+
+@njit(cache=True)
+def _upperboundPoly(c1, pt):
+    """
+    """
+    distances = np.empty(2)
+    tvals = np.array((0., 1.))
+
+    distances[0] = _norm(c1[:, 0] - pt)
+    distances[1] = _norm(c1[:, -1] - pt)
+
+    t1 = tvals[distances.argmin()]
+
+    return distances.min(), t1
 
 
 @njit(cache=True)
 def _norm(x):
-    return np.sqrt(x[0]**2 + x[1]**2)
+    """
+    """
+    summation = 0.
+    for val in x:
+        summation += val*val
+
+    return np.sqrt(summation)
+
+
+def _collCheckBez2Bez(c1, c2, cnt=0, alpha=np.inf, eps=1e-9):
+    """
+    Source: Computation of the minimum distance between two Bezier
+    curves/surfaces
+    """
+    x1 = c1.cpts[0, :]
+    y1 = c1.cpts[1, :]
+    x2 = c2.cpts[0, :]
+    y2 = c2.cpts[1, :]
+
+    if c1.dim == 3:
+        z1 = c1.cpts[2, :]
+    else:
+        z1 = [0]*x1.size
+
+    if c2.dim == 3:
+        z2 = c2.cpts[2, :]
+    else:
+        z2 = [0]*x1.size
+
+    c1 = Bezier([x1, y1, z1])
+    c2 = Bezier([x2, y2, z2])
+
+    poly1 = np.array(tuple(zip(x1, y1, z1)))
+    poly2 = np.array(tuple(zip(x2, y2, z2)))
+
+    cnt += 1
+    if cnt > 100:
+        return -1
+
+    ub, t1local, t2local = _upperbound(c1.cpts, c2.cpts)
+
+    flag, info = gjkNew(poly1, poly2)
+    if flag > 0:
+        return 1
+    else:
+        t1 = 0.5
+        t2 = 0.5
+        lb = 0
+
+    if ub <= alpha:
+        alpha = ub
+
+    if lb >= alpha*(1-eps):
+        return alpha
+
+    else:
+        c3, c4 = c1.split(t1)
+        c5, c6 = c2.split(t2)
+        alpha = min(alpha, _collCheckBez2Bez(c3, c5, cnt=cnt, alpha=alpha))
+        alpha = min(alpha, _collCheckBez2Bez(c3, c6, cnt=cnt, alpha=alpha))
+        alpha = min(alpha, _collCheckBez2Bez(c4, c5, cnt=cnt, alpha=alpha))
+        alpha = min(alpha, _collCheckBez2Bez(c4, c6, cnt=cnt, alpha=alpha))
+
+    return alpha
+
+
+def _collCheckBez2Poly(c1, poly2, cnt=0, alpha=np.inf, eps=1e-9):
+    """
+    Source: Computation of the minimum distance between two Bezier
+    curves/surfaces
+    """
+    x1 = c1.cpts[0, :]
+    y1 = c1.cpts[1, :]
+
+    if c1.dim == 3:
+        z1 = c1.cpts[2, :]
+    else:
+        z1 = [0]*x1.size
+
+    c1 = Bezier([x1, y1, z1])
+
+    poly1 = np.array(tuple(zip(x1, y1, z1)))
+
+    cnt += 1
+    if cnt > 100:
+        return -1
+
+    flag, info = gjkNew(poly1, poly2)
+    if flag > 0:
+        return 1
+    else:
+#        t1 = 0.5
+#        lb = eps
+
+        c3, c4 = c1.split(0.5)
+        if (_collCheckBez2Poly(c3, poly2, cnt=cnt) == 1 and
+            _collCheckBez2Poly(c4, poly2, cnt=cnt) == 1):
+            return 1
+
+    return 0
+
+#    ub = np.inf
+#
+#    flag1, info1 = gjkNew(poly2, np.atleast_2d(poly1[0]))
+#    flag2, info2 = gjkNew(poly2, np.atleast_2d(poly1[-1]))
+#
+#    if flag1 > 0:
+#        ub = info1[2]
+#
+#    if flag2 > 0 and info2[2] < ub:
+#        ub = info2[2]
+#
+#    if ub <= alpha:
+#        alpha = ub
+#
+#    if lb >= alpha*(1-eps):
+#        return round(alpha, int(round(np.log(eps)/np.log(10))))
+#
+#    else:
+#        c3, c4 = c1.split(t1)
+#        alpha = min(alpha, _collCheckBez2Poly(c3, poly2, cnt=cnt, alpha=alpha))
+#        alpha = min(alpha, _collCheckBez2Poly(c4, poly2, cnt=cnt, alpha=alpha))
+#
+#    return alpha
 
 
 # TODO
@@ -1225,3 +1758,115 @@ def _normSquare(x, Nveh, Ndim, prodM):
             S[i, Ndim*i+j] = 1
 
     return np.dot(S, xsquare)
+
+
+def plotPoly(poly, ax):
+    from scipy.spatial import ConvexHull
+
+    pts = poly.copy()
+    hull = ConvexHull(pts, qhull_options='QJ')
+
+    ax.plot(pts.T[0], pts.T[1], pts.T[2], 'ko')
+
+    for s in hull.simplices:
+        s = np.append(s, s[0])
+        ax.plot(pts[s, 0], pts[s, 1], pts[s, 2], 'b-')
+
+
+if __name__ == '__main__':
+    COMPARE_DISC_DIST = False
+    cpts1 = np.array([(0, 1, 2, 3, 4, 5),
+                      (1, 2, 0, 0, 2, 1),
+                      (0, 1, 2, 3, 4, 5)])
+
+    cpts2 = np.array([(0, 1, 2, 3, 4, 5),
+                      (3, 2, 0, 0, 2, 3),
+                      (5, 4, 3, 2, 1, 0)])
+
+    cpts3 = np.array([(0, 1, 2, 3, 4, 5),
+                      (0, 1, 2, 3, 4, 5),
+                      (0, 0, 0, 0, 0, 0)])
+
+    cpts4 = np.array([(5, 4, 3, 2, 1, 0),
+                      (0, 1, 2, 3, 4, 5),
+                      (0, 0, 0, 0, 0, 0,)])
+
+    cpts4[1, :] -= 1
+
+    cpts5 = cpts1 + 3
+
+    poly1 = np.array([(1, 1, 3),
+                      (1, 1, 2),
+                      (1, 2, 1),
+                      (3, 1, 3),
+                      (1, 3, 1)])
+
+    poly2 = np.array([(1, 1, 3),
+                      (1, 1, 2),
+                      (1, 2, 1),
+                      (3, -1, 3),
+                      (1, 3, 1)])
+
+    c1 = Bezier(cpts1, tau=np.linspace(0, 1, 1001))
+    c2 = Bezier(cpts2, tau=np.linspace(0, 1, 1001))
+    c3 = Bezier(cpts3)
+    c4 = Bezier(cpts4)
+    c5 = Bezier(cpts5)
+
+    print('Checking for collisions, 1 means none, 0 means collision')
+    print('C1 and C2')
+    print(_collCheckBez2Bez(c1, c2))
+    print('C3 and C4')
+    print(_collCheckBez2Bez(c3, c4))
+    print('C1 and poly2')
+    print(_collCheckBez2Poly(c1, poly2))
+    print('C5 and poly1')
+    print(_collCheckBez2Poly(c5, poly1))
+
+    print('---')
+    print('Minimum distances')
+    print('C1 and C2')
+    dist, t1, t2 = c1.minDist(c2)
+    print('MinDist: {}, t1: {}, t2: {}'.format(dist, t1, t2))
+    pt1 = c1(t1)
+    pt2 = c2(t2)
+
+    plt.close('all')
+    ax = c1.plot()
+    c2.plot(ax)
+
+    plt.plot(np.array((pt1[0], pt2[0])).squeeze(),
+             np.array((pt1[1], pt2[1])).squeeze(),
+             np.array((pt1[2], pt2[2])).squeeze(), 'g-')
+
+    if COMPARE_DISC_DIST:
+        discreteMinDist = np.inf
+        for i, pt1 in enumerate(c1.curve.T):
+            for j, pt2 in enumerate(c2.curve.T):
+                temp = np.linalg.norm(pt1-pt2)
+                if temp < discreteMinDist:
+                    idx1 = i
+                    idx2 = j
+                    discPt1 = pt1
+                    discPt2 = pt2
+                    discreteMinDist = temp
+
+        print('Disc Min Dist: {}, idx1: {}, idx2: {}'.format(discreteMinDist,
+              idx1, idx2))
+        print('+++++++++++++++++++++++++++++++++++++')
+        plt.plot(c1.curve[0, :], c1.curve[1, :], c1.curve[2, :], '-.')
+        plt.plot(c2.curve[0, :], c2.curve[1, :], c2.curve[2, :], '-.')
+        plt.plot(np.array((discPt1[0], discPt2[0])).squeeze(),
+                 np.array((discPt1[1], discPt2[1])).squeeze(),
+                 np.array((discPt1[2], discPt2[2])).squeeze(), 'r--')
+
+    print('C1 and poly1')
+    shapeDist, t1, pt = _minDist2Poly(c1, poly1)
+    print('Shape Dist: {}, t1: {}, pt: {}'.format(shapeDist, t1, pt))
+    ax2 = c1.plot()
+    plotPoly(poly1, ax2)
+    plt.plot(np.array((c1(t1)[0], pt[0])),
+             np.array((c1(t1)[1], pt[1])),
+             np.array((c1(t1)[2], pt[2])))
+
+    plt.show()
