@@ -6,9 +6,12 @@ Created on Tue Nov 19 11:39:08 2019
 @author: ckielasjensen
 """
 
+import matplotlib.pyplot as plt
 from numba import njit
 import numpy as np
+import pandas as pd
 import scipy.optimize as sop
+import time
 
 import bezier as bez
 
@@ -142,12 +145,20 @@ class Parameters:
         # Generate initial and final points randomly within the control volume
         self.inipts = volume*np.concatenate([
                 np.random.rand(nveh, ndim-1), np.zeros((nveh, 1))], axis=1)
-        self.finalpts = volume*np.concatenate([
-                np.random.rand(nveh, ndim-1), np.ones((nveh, 1))], axis=1)
+
+        # Random final points
+#        self.finalpts = volume*np.concatenate([
+#                np.random.rand(nveh, ndim-1), np.ones((nveh, 1))], axis=1)
+
+        # Hawkeye logo final points
+        df = pd.read_csv('HawksLogo.csv')
+        self.finalpts = np.concatenate((df.values, volume*np.ones((nveh, 1))),
+                                       axis=1)
+        self.finalpts = np.ascontiguousarray(self.finalpts)
 
 
 if __name__ == '__main__':
-    NVEH = 300      # Number of vehicles
+    NVEH = 350      # Number of vehicles
     NDIM = 3        # Number of dimensions
     DEG = 3         # Order of the Bernstein polynomial approximation
     VOLUME = 100    # Length of an edge of the cubic volume being used
@@ -159,8 +170,10 @@ if __name__ == '__main__':
 
     params = Parameters(NVEH, NDIM, DEG, VOLUME, DSAFE)
 
+    tstart = time.time()
     traj = np.atleast_2d([])
     for i in range(NVEH):
+        print(f'Current Vehicle: {i}')
         x0 = initguess(i, params)
 
         def fun(x): return cost(x, params)
@@ -171,14 +184,22 @@ if __name__ == '__main__':
                            method='SLSQP',
                            options={'maxiter': 250,
                                     'disp': True,
-                                    'iprint': 2})
+                                    'iprint': 0})
         traj = reshape(res.x, traj, params.ndim, params.inipts[i, :],
                        params.finalpts[i, :])
+    tend = time.time()
+    print('===============================================================')
+    print(f'Total computation time for {NVEH} vehicles: {tend-tstart}')
+    print('===============================================================')
 
     temp = bez.Bezier(traj[0:NDIM, :])
     vehList = [temp]
     ax = temp.plot(showCpts=False)
+    plt.plot([temp.cpts[0, -1]], [temp.cpts[1, -1]], [temp.cpts[2, -1]],
+             'k.', markersize=15)
     for i in range(NVEH):
         temp = bez.Bezier(traj[i*NDIM:(i+1)*NDIM, :])
         vehList.append(temp)
         temp.plot(ax, showCpts=False)
+        plt.plot([temp.cpts[0, -1]], [temp.cpts[1, -1]], [temp.cpts[2, -1]],
+                 'k.', markersize=15)
