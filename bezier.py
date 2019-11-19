@@ -55,9 +55,14 @@ class BezierParams:
         self._curve = None
 
         if cpts is not None:
-            self._cpts = cpts
-            self._dim = self._cpts.shape[0]
-            self._deg = self._cpts.shape[1] - 1
+            if cpts.ndim == 1:
+                self._cpts = np.atleast_2d(cpts)
+                self._dim = 1
+                self._deg = cpts.size
+            else:
+                self._cpts = cpts
+                self._dim = self._cpts.shape[0]
+                self._deg = self._cpts.shape[1] - 1
         else:
             self._dim = None
             self._deg = None
