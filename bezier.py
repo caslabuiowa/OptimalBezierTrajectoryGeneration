@@ -18,7 +18,7 @@ from numba import njit, jit
 import numpy as np
 from scipy.special import binom
 
-from gjk.gjk import gjkNew
+#from gjk.gjk import gjkNew
 #from gjk import gjkNew
 
 
@@ -58,7 +58,7 @@ class BezierParams:
             if cpts.ndim == 1:
                 self._cpts = np.atleast_2d(cpts)
                 self._dim = 1
-                self._deg = cpts.size
+                self._deg = cpts.size - 1
             else:
                 self._cpts = cpts
                 self._dim = self._cpts.shape[0]
@@ -365,27 +365,6 @@ class Bezier(BezierParams):
 
         return Bezier(cpts, t0, tf)
 
-#        if self.tf == other.tf:
-#            subCpts = self.cpts - other.cpts
-#            newCurve = self.copy()
-#
-#        elif self.tf > other.tf:
-#            tsplit = other.tf
-#            tempCurve, _ = self.split(tsplit)
-#            subCpts = tempCurve.cpts - other.cpts
-#            newCurve = tempCurve.copy()
-#            newCurve.tf = other.tf
-#
-#        else:
-#            tsplit = self.tf
-#            tempCurve, _ = other.split(tsplit)
-#            subCpts = self.cpts - tempCurve.cpts
-#            newCurve = self.copy()
-#            newCurve.tf = self.tf
-#
-#        newCurve.cpts = subCpts
-#        return newCurve
-
     def mul(self, multiplicand):
         """Computes the product of two Bezier curves.
 
@@ -517,10 +496,10 @@ class Bezier(BezierParams):
         :rtype: Bezier
         """
         try:
-            Dm = Bezier.diffMatrixCache[self.deg][self.tf]
+            Dm = Bezier.diffMatrixCache[self.deg][self.tf-self.t0]
         except KeyError:
-            Dm = diffMatrix(self.deg, self.tf)
-            Bezier.diffMatrixCache[self.deg][self.tf] = Dm
+            Dm = diffMatrix(self.deg, self.tf-self.t0)
+            Bezier.diffMatrixCache[self.deg][self.tf-self.t0] = Dm
 
         cptsDot = []
         for i in range(self.dim):
