@@ -209,7 +209,7 @@ class Bezier(BezierParams):
         Returns a Bezier object whose control points are the 0th row of the
         original object's control points.
         """
-        return Bezier(self.cpts[0], tau=self.tau, tf=self.tf)
+        return Bezier(self.cpts[0], t0=self.t0, tf=self.tf)
 
     @property
     def y(self):
@@ -220,7 +220,7 @@ class Bezier(BezierParams):
         2 dimensions, this returns None.
         """
         if self.dim > 1:
-            return Bezier(self.cpts[1], tau=self.tau, tf=self.tf)
+            return Bezier(self.cpts[1], t0=self.t0, tf=self.tf)
         else:
             return None
 
@@ -233,7 +233,7 @@ class Bezier(BezierParams):
         3 dimensions, this returns None.
         """
         if self.dim > 2:
-            return Bezier(self.cpts[2], tau=self.tau, tf=self.tf)
+            return Bezier(self.cpts[2], t0=self.t0, tf=self.tf)
         else:
             return None
 
