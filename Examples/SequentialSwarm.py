@@ -70,10 +70,13 @@ def temporalSeparationConstraints(y, nveh, ndim, maxSep):
         return np.atleast_1d(0.0)
 
 
-def cost(x, params):
+def cost(x, vidx, params):
     """Cost function of the optimization problem
     """
     return 0
+#    y = reshape(x, np.atleast_2d([]), params.ndim, params.inipts[vidx, :],
+#                params.finalpts[vidx, :])
+#    return np.linalg.norm(np.diff(y))
 
 
 @njit(cache=True)
@@ -151,14 +154,14 @@ class Parameters:
 #                np.random.rand(nveh, ndim-1), np.ones((nveh, 1))], axis=1)
 
         # Hawkeye logo final points
-        df = pd.read_csv('HawksLogo.csv')
+        df = pd.read_csv('HawksLogo_1000pts.csv')
         self.finalpts = np.concatenate((df.values, volume*np.ones((nveh, 1))),
                                        axis=1)
         self.finalpts = np.ascontiguousarray(self.finalpts)
 
 
 if __name__ == '__main__':
-    NVEH = 350      # Number of vehicles
+    NVEH = 1000      # Number of vehicles
     NDIM = 3        # Number of dimensions
     DEG = 3         # Order of the Bernstein polynomial approximation
     VOLUME = 100    # Length of an edge of the cubic volume being used
@@ -176,7 +179,7 @@ if __name__ == '__main__':
         print(f'Current Vehicle: {i}')
         x0 = initguess(i, params)
 
-        def fun(x): return cost(x, params)
+        def fun(x): return cost(x, i, params)
         cons = [{'type': 'ineq',
                  'fun': lambda x: nonlcon(x, i, traj, i+1, params)}]
         res = sop.minimize(fun, x0,

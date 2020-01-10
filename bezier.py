@@ -162,8 +162,8 @@ class Bezier(BezierParams):
 
     """
 
-    def __init__(self, cpts=None, t0=0.0, tf=1.0):
-        super().__init__(cpts=cpts, t0=t0, tf=tf)
+    def __init__(self, cpts=None, t0=0.0, tf=1.0, tau=None):
+        super().__init__(cpts=cpts, tau=tau, t0=t0, tf=tf)
 
     def __add__(self, curve):
         return self.add(curve)
@@ -325,10 +325,11 @@ class Bezier(BezierParams):
 
         :param other: Other Bezier curve to be added
         :type other: Bezier
-        :return: Sum of the two Bezier curves
+        :return: Sum of the two Bezier curves, or None if their times do not
+            overlap.
         :rtype: Bezier
         """
-        if self.t0 != other.t0 and self.tf != other.tf:
+        if self.t0 != other.t0 or self.tf != other.tf:
             c1, c2 = _temporalAlignment(self, other)
             cpts = c1.cpts + c2.cpts
             t0 = c1.t0
@@ -338,7 +339,10 @@ class Bezier(BezierParams):
             t0 = self.t0
             tf = self.tf
 
-        return Bezier(cpts, t0, tf)
+        if t0 >= tf:
+            return None
+        else:
+            return Bezier(cpts, t0=t0, tf=tf)
 
     def sub(self, other):
         """Subtracts two Bezier curves
@@ -350,10 +354,11 @@ class Bezier(BezierParams):
 
         :param other: Bezier curve to subtract from the original
         :type other: Bezier
-        :return: Original curve - Other curve
+        :return: Original curve - Other curve, or None if their times do not
+            overlap.
         :rtype: Bezier
         """
-        if self.t0 != other.t0 and self.tf != other.tf:
+        if self.t0 != other.t0 or self.tf != other.tf:
             c1, c2 = _temporalAlignment(self, other)
             cpts = c1.cpts - c2.cpts
             t0 = c1.t0
@@ -363,7 +368,10 @@ class Bezier(BezierParams):
             t0 = self.t0
             tf = self.tf
 
-        return Bezier(cpts, t0, tf)
+        if t0 >= tf:
+            return None
+        else:
+            return Bezier(cpts, t0=t0, tf=tf)
 
     def mul(self, multiplicand):
         """Computes the product of two Bezier curves.
@@ -549,12 +557,17 @@ class Bezier(BezierParams):
             tDiv = 0
 
         for d in range(self.dim):
-            left, right = deCasteljauSplit(self.cpts[d, :], tDiv, self.tf)
+            left, right = deCasteljauSplit(self.cpts[d, :], tDiv - self.t0,
+                                           self.tf - self.t0)
             cpts1.append(left)
             cpts2.append(right[::-1])
 
         c1.cpts = cpts1
+        c1.t0 = self.t0
+        c1.tf = tDiv
         c2.cpts = cpts2
+        c2.t0 = tDiv
+        c2.tf = self.tf
 
         return c1, c2
 
@@ -1130,7 +1143,7 @@ def elevMatrix(N, R=1):
     return T
 
 
-@jit(cache=True, forceobj=True)
+#@jit(cache=True, forceobj=True)
 def prodMatrix(N):
     """Produces a product matrix for obtaining the norm of a Bezier curve
 
