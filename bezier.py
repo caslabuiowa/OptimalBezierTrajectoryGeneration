@@ -329,15 +329,15 @@ class Bezier(BezierParams):
             overlap.
         :rtype: Bezier
         """
-        if self.t0 != other.t0 or self.tf != other.tf:
+        if self.t0 == other.t0 and self.tf == other.tf:
+            cpts = self.cpts + other.cpts
+            t0 = self.t0
+            tf = self.tf
+        else:
             c1, c2 = _temporalAlignment(self, other)
             cpts = c1.cpts + c2.cpts
             t0 = c1.t0
             tf = c1.tf
-        else:
-            cpts = self.cpts + other.cpts
-            t0 = self.t0
-            tf = self.tf
 
         if t0 >= tf:
             return None
@@ -358,15 +358,15 @@ class Bezier(BezierParams):
             overlap.
         :rtype: Bezier
         """
-        if self.t0 != other.t0 or self.tf != other.tf:
+        if self.t0 == other.t0 or self.tf == other.tf:
+            cpts = self.cpts - other.cpts
+            t0 = self.t0
+            tf = self.tf
+        else:
             c1, c2 = _temporalAlignment(self, other)
             cpts = c1.cpts - c2.cpts
             t0 = c1.t0
             tf = c1.tf
-        else:
-            cpts = self.cpts - other.cpts
-            t0 = self.t0
-            tf = self.tf
 
         if t0 >= tf:
             return None
@@ -921,6 +921,8 @@ def _temporalAlignment(c1, c2):
     elif c1.t0 > c2.t0:
         t0 = c1.t0
         _, newC2 = newC2.split(t0)
+    else:
+        t0 = c1.t0
 
     if c1.tf < c2.tf:
         tf = c1.tf
@@ -928,6 +930,8 @@ def _temporalAlignment(c1, c2):
     elif c1.tf > c2.tf:
         tf = c2.tf
         newC1, _ = newC1.split(tf)
+    else:
+        tf = c1.tf
 
     newC1.t0 = t0
     newC2.t0 = t0
