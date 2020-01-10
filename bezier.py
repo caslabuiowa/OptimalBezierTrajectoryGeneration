@@ -358,7 +358,7 @@ class Bezier(BezierParams):
             overlap.
         :rtype: Bezier
         """
-        if self.t0 == other.t0 or self.tf == other.tf:
+        if self.t0 == other.t0 and self.tf == other.tf:
             cpts = self.cpts - other.cpts
             t0 = self.t0
             tf = self.tf
