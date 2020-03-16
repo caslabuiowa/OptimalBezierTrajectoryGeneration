@@ -297,7 +297,7 @@ class Bezier(BezierParams):
         if self.dim == 1:
             ax.plot(self.tau, self.curve[0], **kwargs)
             if showCpts:
-                ax.plot(np.linspace(0, self.tf, self.deg+1),
+                ax.plot(np.linspace(self.t0, self.tf, self.deg+1),
                         self.cpts.squeeze(), '.--')
         elif self.dim == 2 or (self.cpts[2, :] == 0).all():
             ax.plot(self.curve[0], self.curve[1], **kwargs)
