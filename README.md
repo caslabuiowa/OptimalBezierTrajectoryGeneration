@@ -1,3 +1,7 @@
+# NOTICE
+
+This library has been migrated to https://github.com/caslabuiowa/BeBOT.
+
 # BezierTrajectory
 
 The purpose of this repository is to build a library that can be used to generate optimal trajectories, states and control inputs for autonomous vehicles using Bernstein polynomials.
